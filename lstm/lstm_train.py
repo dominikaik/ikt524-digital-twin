@@ -47,7 +47,7 @@ def load_ohio_data(filepath, seq_len=288):
     return X, y, scaler
 
 def train_lstm_for_all_patients(data_dir='data/ohio/2018/train_cleaned/', seq_len=50, batch_size=16, epochs=20, lr=0.001):
-    os.makedirs("models_lstm", exist_ok=True)
+    os.makedirs("lstm/models_lstm", exist_ok=True)
     results = []
     csv_files = sorted([f for f in os.listdir(data_dir) if f.endswith(".csv")])
 
@@ -97,7 +97,7 @@ def train_lstm_for_all_patients(data_dir='data/ohio/2018/train_cleaned/', seq_le
         mae = mean_absolute_error(y_test_orig, y_pred_orig)
         print(f"Test RMSE: {rmse:.2f} | MAE: {mae:.2f}")
 
-        model_path = os.path.join("models_lstm", f"lstm_model_{filename.replace('.csv','')}.pth")
+        model_path = os.path.join("lstm/models_lstm", f"lstm_model_{filename.replace('.csv','')}.pth")
         torch.save({'model_state_dict': model.state_dict(), 'scaler': scaler}, model_path)
 
         results.append({"patient": filename, "rmse": rmse, "mae": mae})

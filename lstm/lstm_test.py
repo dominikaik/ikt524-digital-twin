@@ -59,7 +59,7 @@ class GlucoseLSTM(nn.Module):
 
 # 4. Load model & scaler
 
-model_path = 'models_lstm/lstm_model_559-ws-training.pth'  # adjust path if needed
+model_path = 'lstm/models_lstm/lstm_model_559-ws-training.pth'  # adjust path if needed
 
 # Safely load scaler from checkpoint
 from sklearn.preprocessing import StandardScaler

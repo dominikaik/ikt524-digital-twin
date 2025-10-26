@@ -74,7 +74,7 @@ def train_baseline_and_finetune(data_dir='data/ohio/2018/train_cleaned/',
                                 epochs_baseline=1, epochs_finetune=1, lr=0.001,
                                 finetune_file='559-ws-training.csv'):
 
-    os.makedirs("models_lstm", exist_ok=True)
+    os.makedirs("lstm/models_lstm", exist_ok=True)
     csv_files = sorted([f for f in os.listdir(data_dir) if f.endswith(".csv")])
 
     if finetune_file not in csv_files:
@@ -111,8 +111,8 @@ def train_baseline_and_finetune(data_dir='data/ohio/2018/train_cleaned/',
             loss.backward()
             optimizer.step()
 
-    torch.save(model.state_dict(), "models_lstm/baseline_model.pth")
-    joblib.dump(scaler, "models_lstm/baseline_scaler.joblib")
+    torch.save(model.state_dict(), "lstm/models_lstm/baseline_model.pth")
+    joblib.dump(scaler, "lstm/models_lstm/baseline_scaler.joblib")
     print("Baseline model saved.")
 
     # Fine-tuning
@@ -124,7 +124,7 @@ def train_baseline_and_finetune(data_dir='data/ohio/2018/train_cleaned/',
 
     train_loader_target = DataLoader(TensorDataset(X_train, y_train), batch_size=batch_size, shuffle=True)
 
-    model.load_state_dict(torch.load("models_lstm/baseline_model.pth", map_location=device))
+    model.load_state_dict(torch.load("lstm/models_lstm/baseline_model.pth", map_location=device))
     optimizer = torch.optim.Adam(model.parameters(), lr=lr * 0.5)
 
     for epoch in tqdm(range(epochs_finetune), desc="Finetune Epochs"):
@@ -149,7 +149,7 @@ def train_baseline_and_finetune(data_dir='data/ohio/2018/train_cleaned/',
     print(f"Fine-tune RMSE: {rmse:.2f} | MAE: {mae:.2f}")
 
     torch.save({'model_state_dict': model.state_dict(), 'scaler': scaler_target},
-               f"models_lstm/lstm_model_finetuned_{target_file.replace('.csv','')}.pth")
+               f"lstm/models_lstm/lstm_model_finetuned_{target_file.replace('.csv','')}.pth")
     print("Fine-tuned model saved.")
 
     # Iterative prediction example
