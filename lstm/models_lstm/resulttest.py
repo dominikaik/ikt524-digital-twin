@@ -3,8 +3,8 @@ import pandas as pd
 import numpy as np
 from sklearn.metrics import mean_squared_error, mean_absolute_error
 
-# optionaler Pfad als Argument
-fp = sys.argv[1] if len(sys.argv) > 1 else "lstm/models_lstm/eval_559-ws-testing_all12.csv"
+
+fp = sys.argv[1] if len(sys.argv) > 1 else "lstm/models_lstm/eval_559-ws-testing.csv"
 df = pd.read_csv(fp)
 
 results = []
@@ -14,12 +14,12 @@ for i in range(1, n_horizons + 1):
     y_col = f"y_true_{i}"
     p_col = f"pred_{i}"
     if y_col not in df.columns or p_col not in df.columns:
-        print(f"Spalten {y_col} oder {p_col} nicht gefunden — überspringe Horizon {i}")
+        print(f"Horizon {i} columns not found in CSV")
         continue
 
     sub = df[[y_col, p_col]].dropna()
     if sub.empty:
-        print(f"Keine gültigen Werte für Horizon {i} — überspringe")
+        print(f"No valid values for Horizon {i} — skipping")
         continue
 
     y_true = sub[y_col].values

@@ -10,7 +10,7 @@ import joblib
 from tqdm import tqdm
 
 # Hyperparameters
-epochs_baseline=1
+epochs_baseline=15
 epochs_finetune=10
 seq_len=50
 
@@ -156,12 +156,6 @@ def train_baseline_and_finetune(data_dir='data/ohio/2018/train_cleaned/',
     print("Future predictions:", future_preds)
 
 def evaluate_on_file(model, file_path, scaler, seq_len):
-    """
-    Evaluate model on given CSV file.
-    - Für jede gültige Startposition einmalig iterativ bis 12 Schritte vorhersagen.
-    - Speichere CSV mit allen 12 Vorhersagen pro Startposition und die realen (ground-truth) Werte 1..12.
-    - Berechne Metriken für Horizonte 1, 3, 12.
-    """
     df_raw = pd.read_csv(file_path)
     df = df_raw[['glucose_level', 'bolus_dose', 'meal_carbs']].fillna(0)
     df['meal_indicator'] = (df['meal_carbs'] > 0).astype(float)
@@ -228,7 +222,7 @@ def evaluate_on_file(model, file_path, scaler, seq_len):
         out_dict[f"pred_{step}"] = all_preds[:, step-1]
 
     out_df = pd.DataFrame(out_dict)
-    out_path = os.path.join("lstm/models_lstm", f"eval_{os.path.basename(file_path).replace('.csv','')}_all12.csv")
+    out_path = os.path.join("lstm/models_lstm", f"eval_{os.path.basename(file_path).replace('.csv','')}.csv")
     out_df.to_csv(out_path, index=False)
     print(f"Saved full-horizon CSV with real values: {out_path}")
 
