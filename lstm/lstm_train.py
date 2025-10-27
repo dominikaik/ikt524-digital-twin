@@ -6,6 +6,7 @@ import numpy as np
 from sklearn.preprocessing import StandardScaler
 from torch.utils.data import TensorDataset, DataLoader
 from sklearn.metrics import mean_squared_error, mean_absolute_error
+from tqdm import tqdm
 
 # Device setup
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -42,24 +43,58 @@ def load_ohio_data(filepath, seq_len=288):
         X.append(data_scaled[i:i+seq_len])
         y.append(data_scaled[i+seq_len, 0])  # Nur ein Schritt weiter
 
-    X = torch.tensor(np.array(X), dtype=torch.float32).to(device)
-    y = torch.tensor(np.array(y), dtype=torch.float32).to(device)
-    return X, y, scaler
+    X = torch.tensor(np.array(X), dtype=torch.float32)
+    y = torch.tensor(np.array(y), dtype=torch.float32)
+    return X, y, scaler, df
 
-def train_lstm_for_all_patients(data_dir='data/ohio/2018/train_cleaned/', seq_len=50, batch_size=16, epochs=20, lr=0.001):
-    os.makedirs("lstm/models_lstm", exist_ok=True)
-    results = []
+def _predict_iteratively_local(model, initial_sequence, steps, scaler):
+    """Iterative 1-step repeated predictor. Returns array (steps,) in original scale if scaler given."""
+    model.eval()
+    seq = initial_sequence.clone().detach().to(device)
+    preds_scaled = []
+    with torch.no_grad():
+        for _ in range(steps):
+            out = model(seq.unsqueeze(0).to(device))  # (1,) on device
+            preds_scaled.append(out.cpu().item())
+            new_row = torch.zeros((1, seq.shape[1]), device=seq.device, dtype=seq.dtype)
+            new_row[0, 0] = out.squeeze().to(seq.dtype)
+            seq = torch.cat([seq[1:], new_row], dim=0)
+
+    used_scaler = scaler
+    if used_scaler is not None:
+        zeros = np.zeros((len(preds_scaled), seq.shape[1]-1))
+        preds_orig = used_scaler.inverse_transform(np.concatenate([np.array(preds_scaled).reshape(-1,1), zeros], axis=1))[:,0]
+        return preds_orig
+    else:
+        return np.array(preds_scaled)
+
+def train_lstm_and_iterative_eval(data_dir='data/ohio/2018/train_cleaned/', seq_len=50, batch_size=16, epochs=20, lr=0.001, target_file=None, max_horizon=12, out_dir="lstm/models_lstm"):
+    """
+    Train a simple LSTM on target_file (or all files if TRAIN_ALL True).
+    After training, run iterative predictions up to max_horizon for each valid start index,
+    save CSV (y_true_1..max, pred_1..max) and print metrics for horizons 1,3,12.
+    """
+    os.makedirs(out_dir, exist_ok=True)
     csv_files = sorted([f for f in os.listdir(data_dir) if f.endswith(".csv")])
 
-    if not TRAIN_ALL and csv_files:
+    if not csv_files:
+        raise RuntimeError(f"No CSVs found in {data_dir}")
+
+    if not TRAIN_ALL:
         csv_files = [csv_files[0]]
-        print(f"TRAIN_ALL=False → only '{csv_files[0]}' will be trained.")
 
     for filename in csv_files:
+        if target_file is not None and filename != target_file:
+            continue
+
         filepath = os.path.join(data_dir, filename)
         print(f"\nTraining for: {filename}")
 
-        X, y, scaler = load_ohio_data(filepath, seq_len)
+        X, y, scaler, df_raw = load_ohio_data(filepath, seq_len)
+        if len(X) == 0:
+            print("Not enough data for seq_len, skipping:", filename)
+            continue
+
         train_size = int(0.8 * len(X))
         X_train, X_test = X[:train_size], X[train_size:]
         y_train, y_test = y[:train_size], y[train_size:]
@@ -83,31 +118,16 @@ def train_lstm_for_all_patients(data_dir='data/ohio/2018/train_cleaned/', seq_le
                 epoch_loss += loss.item()
             print(f"  Epoch {epoch+1}/{epochs} - Loss: {epoch_loss/len(train_loader):.4f}")
 
-        model.eval()
-        with torch.no_grad():
-            y_pred_test = model(X_test).cpu().numpy()
-            y_test_np = y_test.cpu().numpy()
-
-        zeros = np.zeros((len(y_test_np), X.shape[2]-1))
-        y_test_orig = scaler.inverse_transform(np.concatenate([y_test_np.reshape(-1,1), zeros], axis=1))[:,0]
-        y_pred_orig = scaler.inverse_transform(np.concatenate([y_pred_test.reshape(-1,1), zeros], axis=1))[:,0]
-
-        mse = mean_squared_error(y_test_orig, y_pred_orig)
-        rmse = float(np.sqrt(mse))
-        mae = mean_absolute_error(y_test_orig, y_pred_orig)
-        print(f"Test RMSE: {rmse:.2f} | MAE: {mae:.2f}")
-
-        model_path = os.path.join("models_lstm", f"lstm_model_{filename.replace('.csv','')}.pth")
-        torch.save({'model_state_dict': model.state_dict(), 'scaler': scaler}, model_path)
-
-        results.append({"patient": filename, "rmse": rmse, "mae": mae})
-
-    df_results = pd.DataFrame(results)
-    df_results.to_csv("lstm_evaluation_results.csv", index=False)
-    print("Evaluation results saved to lstm_evaluation_results.csv")
+        # After training: only save model + scaler (no evaluation here)
+        single_dir = os.path.join(out_dir, "single")
+        os.makedirs(single_dir, exist_ok=True)
+        ckpt_path = os.path.join(single_dir, f"lstm_model_simple_{filename.replace('.csv','')}.pth")
+        torch.save({'model_state_dict': model.state_dict(), 'scaler': scaler}, ckpt_path)
+        print("Saved model checkpoint (no evaluation):", ckpt_path)
 
 if __name__ == '__main__':
+    # minimal CLI for standalone use
     if os.path.exists('data/ohio/2018/train_cleaned/'):
-        train_lstm_for_all_patients('data/ohio/2018/train_cleaned/')
+        train_lstm_and_iterative_eval('data/ohio/2018/train_cleaned/', seq_len=50, epochs=1, max_horizon=12)
     else:
         print("Training directory not found.")

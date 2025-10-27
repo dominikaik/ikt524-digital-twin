@@ -8,6 +8,7 @@ from torch.utils.data import TensorDataset, DataLoader
 from sklearn.metrics import mean_squared_error, mean_absolute_error
 import joblib
 from tqdm import tqdm
+import argparse
 
 # Hyperparameters
 epochs_baseline=15
@@ -75,12 +76,17 @@ def predict_iteratively(model, initial_sequence, steps, scaler):
     pred_orig = scaler.inverse_transform(np.concatenate([np.array(predictions).reshape(-1,1), zeros], axis=1))[:,0]
     return pred_orig
 
-def train_baseline_and_finetune(data_dir='data/ohio/2018/train_cleaned/', 
-                                seq_len=seq_len, batch_size=16, 
+def train_baseline_and_finetune(data_dir='data/ohio/2018/train_cleaned/',
+                                seq_len=seq_len, batch_size=16,
                                 epochs_baseline=epochs_baseline, epochs_finetune=epochs_finetune, lr=0.001,
-                                finetune_file='559-ws-training.csv'):
+                                finetune_file='559-ws-training.csv', out_dir="lstm/models_lstm"):
 
-    os.makedirs("lstm/models_lstm", exist_ok=True)
+    # create run subfolders: base_line and fine_tuned
+    os.makedirs(out_dir, exist_ok=True)
+    base_dir = os.path.join(out_dir, "base_line")
+    finetune_dir = os.path.join(out_dir, "fine_tuned")
+    os.makedirs(base_dir, exist_ok=True)
+    os.makedirs(finetune_dir, exist_ok=True)
     csv_files = sorted([f for f in os.listdir(data_dir) if f.endswith(".csv")])
 
     if finetune_file not in csv_files:
@@ -102,7 +108,7 @@ def train_baseline_and_finetune(data_dir='data/ohio/2018/train_cleaned/',
 
     X_all = torch.cat(X_all).to(device)
     y_all = torch.cat(y_all).to(device)
-    train_loader = DataLoader(TensorDataset(X_all, y_all), batch_size=batch_size, shuffle=True)
+    train_loader = DataLoader(TensorDataset(X_all, y_all), batch_size=batch_size, shuffle=True, num_workers=6)
 
     model = GlucoseLSTM(X_all.shape[2]).to(device)
     criterion = nn.SmoothL1Loss()
@@ -117,9 +123,9 @@ def train_baseline_and_finetune(data_dir='data/ohio/2018/train_cleaned/',
             loss.backward()
             optimizer.step()
 
-    torch.save(model.state_dict(), "lstm/models_lstm/baseline_model.pth")
-    joblib.dump(scaler, "lstm/models_lstm/baseline_scaler.joblib")
-    print("Baseline model saved.")
+    torch.save(model.state_dict(), os.path.join(base_dir, "baseline_model.pth"))
+    joblib.dump(scaler, os.path.join(base_dir, "baseline_scaler.joblib"))
+    print("Baseline model saved ->", base_dir)
 
     # Fine-tuning
     print(f"\nFine-tuning on {target_file} ...")
@@ -128,9 +134,9 @@ def train_baseline_and_finetune(data_dir='data/ohio/2018/train_cleaned/',
     X_train, X_test = X_target[:train_size].to(device), X_target[train_size:].to(device)
     y_train, y_test = y_target[:train_size].to(device), y_target[train_size:].to(device)
 
-    train_loader_target = DataLoader(TensorDataset(X_train, y_train), batch_size=batch_size, shuffle=True)
+    train_loader_target = DataLoader(TensorDataset(X_train, y_train), batch_size=batch_size, shuffle=True, num_workers=6)
 
-    model.load_state_dict(torch.load("lstm/models_lstm/baseline_model.pth", map_location=device))
+    model.load_state_dict(torch.load(os.path.join(base_dir, "baseline_model.pth"), map_location=device))
     optimizer = torch.optim.Adam(model.parameters(), lr=lr * 0.5)
 
     for epoch in tqdm(range(epochs_finetune), desc="Finetune Epochs"):
@@ -141,96 +147,32 @@ def train_baseline_and_finetune(data_dir='data/ohio/2018/train_cleaned/',
             loss.backward()
             optimizer.step()
 
-    torch.save({'model_state_dict': model.state_dict(), 'scaler': scaler_target},
-               f"lstm/models_lstm/lstm_model_finetuned_{target_file.replace('.csv','')}.pth")
-    print("Fine-tuned model saved.")
+    finetune_path = os.path.join(finetune_dir, f"lstm_model_finetuned_{target_file.replace('.csv','')}.pth")
+    torch.save({'model_state_dict': model.state_dict(), 'scaler': scaler_target}, finetune_path)
+    print("Fine-tuned model saved ->", finetune_path)
 
-    # Evaluate on the requested file in train_cleaned
-    eval_path = 'data/ohio/2018/test_cleaned/559-ws-testing.csv'
-    print(f"\nRunning evaluation on: {eval_path}")
-    evaluate_on_file(model, eval_path, scaler_target, seq_len)
-
-    # Iterative prediction example
-    print("\nIterative prediction (10 steps):")
-    future_preds = predict_iteratively(model, X_test[-1], steps=10, scaler=scaler_target)
-    print("Future predictions:", future_preds)
-
-def evaluate_on_file(model, file_path, scaler, seq_len):
-    df_raw = pd.read_csv(file_path)
-    df = df_raw[['glucose_level', 'bolus_dose', 'meal_carbs']].fillna(0)
-    df['meal_indicator'] = (df['meal_carbs'] > 0).astype(float)
-    df['glucose_change'] = df['glucose_level'].diff().fillna(0)
-
-    # choose scaler (provided or fallback baseline)
-    used_scaler = scaler
-    if used_scaler is None:
-        baseline_path = "lstm/models_lstm/baseline_scaler.joblib"
-        if os.path.exists(baseline_path):
-            used_scaler = joblib.load(baseline_path)
-
-    if used_scaler is None:
-        print("Warning: no scaler available -> evaluation requires a scaler; skipping evaluation.")
-        return None
-
-    # scale data and prepare indices
-    data_scaled = used_scaler.transform(df)
-    N = len(data_scaled)
-    max_horizon = 12
-    if N - seq_len - max_horizon + 1 <= 0:
-        print("Not enough data in file for the requested horizons/sequence length.")
-        return None
-
-    indices = range(0, N - seq_len - max_horizon + 1)
-    all_preds = []   # will hold arrays length max_horizon per index (original scale)
-    truths_all = []  # will hold arrays length max_horizon per index (original scale)
-
-    model.eval()
-    # iterate once per start index: compute iterative predictions up to 12
-    for idx in tqdm(indices, desc="Iterative eval (per-start index)"):
-        init_scaled = torch.tensor(data_scaled[idx:idx+seq_len], dtype=torch.float32)
-        pred_seq_orig = predict_iteratively(model, init_scaled, steps=max_horizon, scaler=used_scaler)
-        all_preds.append(pred_seq_orig)  # length 12, original scale
-
-        # collect ground truth values for horizons 1..12 (original scale)
-        truths_row = []
-        for h in range(1, max_horizon+1):
-            truth_row_scaled = data_scaled[idx + seq_len + h - 1]
-            truth_orig = used_scaler.inverse_transform(truth_row_scaled.reshape(1, -1))[0, 0]
-            truths_row.append(truth_orig)
-        truths_all.append(truths_row)
-
-    all_preds = np.array(all_preds)    # shape (num_indices, 12)
-    truths_all = np.array(truths_all)  # shape (num_indices, 12)
-    num = all_preds.shape[0]
-
-    # compute metrics for horizons 1,3,12
-    metrics = {}
-    for h in (1,3,12):
-        preds_h = all_preds[:, h-1]
-        truths_h = truths_all[:, h-1]
-        mse_h = mean_squared_error(truths_h, preds_h)
-        rmse_h = float(np.sqrt(mse_h))
-        mae_h = mean_absolute_error(truths_h, preds_h)
-        metrics[h] = {"rmse": rmse_h, "mae": mae_h}
-        print(f"Iterative {h}-step -> RMSE: {rmse_h:.2f} | MAE: {mae_h:.2f}")
-
-    # Build CSV: include y_true_1..y_true_12 and preds_1..preds_12
-    out_dict = {"start_index": np.arange(num)}
-    for step in range(1, max_horizon+1):
-        out_dict[f"y_true_{step}"] = truths_all[:, step-1]
-    for step in range(1, max_horizon+1):
-        out_dict[f"pred_{step}"] = all_preds[:, step-1]
-
-    out_df = pd.DataFrame(out_dict)
-    out_path = os.path.join("lstm/models_lstm", f"eval_{os.path.basename(file_path).replace('.csv','')}.csv")
-    out_df.to_csv(out_path, index=False)
-    print(f"Saved full-horizon CSV with real values: {out_path}")
-
-    return metrics
 
 if __name__ == '__main__':
-    data_path = 'data/ohio/2018/train_cleaned/'
-    if os.path.exists(data_path):
-        train_baseline_and_finetune(data_path, finetune_file='559-ws-training.csv')
+    parser = argparse.ArgumentParser(description="Train / finetune Glucose LSTM")
+    parser.add_argument("--data_path", type=str, default="data/ohio/2018/train_cleaned/", help="Path to training CSV folder")
+    parser.add_argument("--finetune_file", type=str, default="559-ws-training.csv", help="Filename in data_path to finetune on")
+    parser.add_argument("--seq_len", type=int, default=50, help="Sequence length")
+    parser.add_argument("--batch_size", type=int, default=16, help="Batch size")
+    parser.add_argument("--epochs_baseline", type=int, default=15, help="Epochs for baseline training")
+    parser.add_argument("--epochs_finetune", type=int, default=10, help="Epochs for finetuning")
+    parser.add_argument("--lr", type=float, default=0.001, help="Learning rate")
+    args = parser.parse_args()
+
+    # Call training function with CLI-provided (or default) hyperparameters
+    if os.path.exists(args.data_path):
+        train_baseline_and_finetune(
+            data_dir=args.data_path,
+            seq_len=args.seq_len,
+            batch_size=args.batch_size,
+            epochs_baseline=args.epochs_baseline,
+            epochs_finetune=args.epochs_finetune,
+            lr=args.lr,
+            finetune_file=args.finetune_file
+        )
     else:
-        print("Training directory not found.")
+        print("Training directory not found:", args.data_path)
