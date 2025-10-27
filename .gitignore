@@ -1,0 +1,5 @@
+plots_lstm/
+__pycache__/
+digital_twin/data/ohio/__pycache__/
+digital_twin/lstm/__pycache__/
+digital_twin/lstm/plots_lstm/
