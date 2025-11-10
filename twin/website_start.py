@@ -1,12 +1,12 @@
 # app.py - English version
+from pathlib import Path
 import streamlit as st
 import json
-from pathlib import Path
 import plotly.graph_objects as go
 import importlib.util
-import sys
 import numpy as np
 import uuid
+import pandas as pd
 
 # Paths
 DEFAULT_JSON = Path("/home/coder/digital_twin/twin/simulation_data/json/block_00042.json")
@@ -26,7 +26,6 @@ def load_twin_module(path: Path):
     return mod
 
 def render_plot(result, data, future_actuals=None):
-    # Build historical glucose list (only valid numeric glucose_level)
     hist = []
     for row in data:
         try:
@@ -35,17 +34,13 @@ def render_plot(result, data, future_actuals=None):
             hist.append(None)
     hist_valid = [v for v in hist if v is not None]
     if len(hist_valid) == 0:
-        st.error("No valid glucose_level values found in input JSON.")
-        return
+        return None
 
-    # choose history length N (use 11 to show -10..0 like CLI)
     N = 11
     hist_tail = hist_valid[-N:]
     n_hist = len(hist_tail)
-    x_hist = np.arange(-n_hist + 1, 1)  # e.g. -10..0
+    x_hist = np.arange(-n_hist + 1, 1)
 
-    # predictions: discover any sequence-like entries in the result and plot them
-    # collect any list/tuple/ndarray in result whose elements are numeric (convertible to float)
     preds_dict = {}
     H = 0
     for k, v in result.items():
@@ -53,27 +48,22 @@ def render_plot(result, data, future_actuals=None):
             try:
                 vals = [float(x) for x in v]
             except Exception:
-                # skip non-numeric sequences
                 continue
             preds_dict[k] = vals
             H = max(H, len(vals))
     model_keys = sorted(preds_dict.keys())
     x_pred = np.arange(1, H + 1)
 
-    # Plot with Plotly: history on negative indices, predictions on positive indices
     fig = go.Figure()
-
     fig.add_trace(go.Scatter(
         x=x_hist.tolist(),
         y=hist_tail,
         mode="lines+markers",
         name="History",
-        line=dict(color="#FFA500", width=3)  # orange for history
+        line=dict(color="#FFA500", width=3)
     ))
 
-    # extend prediction traces to x=0 to avoid a gap: prepend the last historical value at x=0
     last_hist_val = hist_tail[-1] if len(hist_tail) > 0 else None
-
     def add_extended_trace(preds, name, color, dash):
         if len(preds) == 0:
             return
@@ -91,15 +81,12 @@ def render_plot(result, data, future_actuals=None):
             line=dict(color=color, dash=dash)
         ))
 
-    # color / dash cycles for multiple model traces
     colors = ["red", "blue", "green", "magenta", "cyan", "#FF7F0E"]
     dashes = ["dash", "dot", "dashdot", "longdash", "solid"]
     for i, k in enumerate(model_keys):
-        # use the key name as the legend label (clean underscores)
         label = str(k).replace("_", " ").strip()
         add_extended_trace(preds_dict.get(k, []), label, colors[i % len(colors)], dashes[i % len(dashes)])
 
-    # overlay future actual glucose values (if provided) starting at x=1...
     if future_actuals:
         try:
             future_vals = [float(v) for v in future_actuals]
@@ -115,10 +102,8 @@ def render_plot(result, data, future_actuals=None):
         except Exception:
             pass
 
-    # vertical line at current time 0
     fig.add_vline(x=0, line=dict(color="gray", dash="dash"), opacity=0.6)
 
-    # Layout: white text on dark background, orange history, white ticks/titles
     fig.update_layout(
         title="Glucose: History (-N..0) and Forecast (1..H)",
         xaxis_title="Time steps (history: negative -> 0 current, predictions: 1..H)",
@@ -130,18 +115,41 @@ def render_plot(result, data, future_actuals=None):
         xaxis=dict(title=dict(font=dict(color="white"))),
         yaxis=dict(title=dict(font=dict(color="white")))
     )
-
-    # Set tick color to white
     fig.update_xaxes(tickfont=dict(color="white"))
     fig.update_yaxes(tickfont=dict(color="white"))
 
-    # render plot once with a unique key to avoid Streamlit duplicate-ID errors
-    st.plotly_chart(fig, use_container_width=True, key=f"forecast_plot_{uuid.uuid4()}")
+    return fig
+
+def build_future_preview(future_data, use_custom_cov, custom_bolus, custom_meal, custom_sleep, custom_exercise):
+    if not future_data:
+        return None
+    rows = []
+    for i, item in enumerate(future_data):
+        r = {}
+        r["timestamp"] = item.get("timestamp")
+        r["glucose_level"] = item.get("glucose_level")
+        if use_custom_cov and i == 0:
+            r["bolus_dose"] = float(custom_bolus)
+            r["meal_carbs"] = float(custom_meal)
+        else:
+            r["bolus_dose"] = float(item.get("bolus_dose", 0.0))
+            r["meal_carbs"] = float(item.get("meal_carbs", 0.0))
+        if use_custom_cov:
+            r["basis_sleep_binary"] = int(custom_sleep)
+            r["exercise_intensity"] = int(custom_exercise)
+        else:
+            r["basis_sleep_binary"] = int(item.get("basis_sleep_binary", 0))
+            r["exercise_intensity"] = int(item.get("exercise_intensity", 0))
+        rows.append(r)
+    df = pd.DataFrame(rows)
+    cols = ["timestamp", "glucose_level", "bolus_dose", "meal_carbs", "basis_sleep_binary", "exercise_intensity"]
+    df = df[[c for c in cols if c in df.columns]]
+    return df
 
 # --- Streamlit App ---
 st.title("Glucose Forecast Dashboard")
 
-# JSON upload or default
+# --- Upload JSON ---
 uploaded_file = st.file_uploader("Upload JSON file", type="json")
 if uploaded_file:
     data = json.load(uploaded_file)
@@ -149,7 +157,7 @@ else:
     st.info(f"No file uploaded — using default: {DEFAULT_JSON}")
     data = load_json(DEFAULT_JSON)
 
-# load twin_json
+# --- Load twin module ---
 try:
     twin_mod = load_twin_module(TWIN_JSON_FILE)
 except Exception as e:
@@ -160,7 +168,7 @@ if not hasattr(twin_mod, "forecast"):
     st.error("twin_json.py does not contain a function `forecast(data)`")
     st.stop()
 
-# initial forecast (default: no future covariates)
+# --- Forecast computation ---
 try:
     result = twin_mod.forecast(data)
 except Exception as e:
@@ -169,34 +177,88 @@ except Exception as e:
 
 st.subheader("Forecast Results (recent steps)")
 
-# Controls: option to overlay real future glucose values (disabled by default)
-st.markdown("---")
-st.write("Optional: overlay real future glucose values from the future block (disabled by default).")
-show_future_actuals = st.checkbox("Overlay future actual glucose (from future_block_00042.json)", value=False)
-
-future_actuals = None
-if show_future_actuals:
-    if not FUTURE_JSON_FILE.exists():
-        st.error(f"Future file not found: {FUTURE_JSON_FILE}")
-    else:
-        try:
-            future_data = load_json(FUTURE_JSON_FILE)
-            # extract glucose_level sequence from the future block
-            future_actuals = [float(item.get("glucose_level")) for item in future_data if "glucose_level" in item]
-            st.info(f"Loaded {len(future_actuals)} future glucose values.")
-        except Exception as e:
-            st.error(f"Failed to load future values: {e}")
-            future_actuals = None
-
-# render plot (initial and after toggling checkbox will re-render once with or without future_actuals)
-render_plot(result, data, future_actuals=future_actuals)
-
-# (optional) keep the existing Re-run forecast button if you still want to re-run model predictions
-if st.button("Re-run forecast (recompute model predictions)"):
+# --- Load future data ---
+future_raw = None
+if FUTURE_JSON_FILE.exists():
     try:
-        new_result = twin_mod.forecast(data)
+        future_raw = load_json(FUTURE_JSON_FILE)
+    except Exception:
+        future_raw = None
+
+# --- Control Panel über dem Plot ---
+with st.expander("Controls / Settings", expanded=True):
+    # Checkboxes
+    show_future_actuals = st.checkbox("Overlay future actual glucose", value=False)
+    use_custom_cov = st.checkbox("Use custom future covariates", value=False)
+
+    # Custom covariates input
+    custom_bolus, custom_meal, custom_sleep, custom_exercise = 0.0, 0.0, 0, 0
+    if use_custom_cov:
+        col1, col2 = st.columns(2)
+        with col1:
+            custom_bolus = st.number_input("Bolus dose (first future step)", value=0.0, step=0.5, format="%.2f")
+            custom_meal = st.number_input("Meal carbs (first future step)", value=0.0, step=10.0, format="%.1f")
+        with col2:
+            custom_sleep = 1 if st.checkbox("basis_sleep_binary (on/off)", value=False) else 0
+            custom_exercise = st.selectbox("exercise_intensity (0..3)", options=[0,1,2,3], index=0)
+
+    # Re-run Button
+    rerun_clicked = st.button("Re-run forecast (recompute model predictions)")
+
+# --- Placeholders für Plot und Tabelle ---
+chart_container = st.empty()
+table_container = st.empty()
+
+# --- Re-run Forecast wenn Button geklickt ---
+if rerun_clicked:
+    try:
+        override_list = []
+        for i, item in enumerate(future_raw or []):
+            new_item = {}
+            new_item["timestamp"] = item.get("timestamp")
+            new_item["glucose_level"] = item.get("glucose_level")
+            if use_custom_cov and i == 0:
+                new_item["bolus_dose"] = float(custom_bolus)
+                new_item["meal_carbs"] = float(custom_meal)
+            else:
+                new_item["bolus_dose"] = float(item.get("bolus_dose", 0.0))
+                new_item["meal_carbs"] = float(item.get("meal_carbs", 0.0))
+            new_item["basis_sleep_binary"] = int(custom_sleep)
+            new_item["exercise_intensity"] = int(custom_exercise)
+            override_list.append(new_item)
+
+        tmp_path = Path("/tmp") / f"future_override_{uuid.uuid4().hex}.json"
+        tmp_path.parent.mkdir(parents=True, exist_ok=True)
+        with tmp_path.open("w", encoding="utf-8") as f:
+            json.dump(override_list, f, ensure_ascii=False, indent=2)
+
+        result = twin_mod.forecast(data, future_glob=str(tmp_path))
         st.success("Forecast re-run complete.")
-        # when re-running, respect the checkbox for overlaying future actuals
-        render_plot(new_result, data, future_actuals=future_actuals)
-    except Exception as e:
-        st.error(f"Error re-running forecast: {e}")
+
+        fig = render_plot(result, data, future_actuals=[item.get("glucose_level") for item in future_raw] if future_raw else None)
+        if fig is None:
+            chart_container.write("Cannot build plot after re-run: no valid historical glucose found.")
+        else:
+            chart_container.plotly_chart(fig, width="stretch", key=f"forecast_plot_{uuid.uuid4().hex}")
+
+        if override_list:
+            table_container.table(pd.DataFrame(override_list))
+
+    finally:
+        if tmp_path.exists():
+            tmp_path.unlink()
+
+# --- Initial Plot rendern ---
+fig = render_plot(result, data, future_actuals=[item.get("glucose_level") for item in future_raw] if future_raw else None)
+if fig is None:
+    chart_container.write("Cannot build plot: no valid historical glucose found.")
+else:
+    chart_container.plotly_chart(fig, width="stretch", key=f"forecast_plot_{uuid.uuid4().hex}")
+
+# --- Show future preview ---
+preview_df = build_future_preview(future_raw, use_custom_cov, custom_bolus, custom_meal, custom_sleep, custom_exercise)
+st.markdown("**Configured future (preview of values used for override):**")
+if preview_df is None or preview_df.empty:
+    table_container.write("No future block available to preview.")
+else:
+    table_container.table(preview_df)
