@@ -11,8 +11,8 @@ from tqdm import tqdm
 import argparse
 
 # Hyperparameters
-epochs_baseline=15
-epochs_finetune=10
+epochs_baseline=1
+epochs_finetune=1
 seq_len=50
 
 
@@ -106,9 +106,10 @@ def train_baseline_and_finetune(data_dir='data/ohio/2018/train_cleaned/',
         X_all.append(X)
         y_all.append(y)
 
-    X_all = torch.cat(X_all).to(device)
-    y_all = torch.cat(y_all).to(device)
-    train_loader = DataLoader(TensorDataset(X_all, y_all), batch_size=batch_size, shuffle=True, num_workers=6)
+    # keep tensors on CPU for DataLoader workers, move to device inside the loop
+    X_all = torch.cat(X_all)
+    y_all = torch.cat(y_all)
+    train_loader = DataLoader(TensorDataset(X_all, y_all), batch_size=batch_size, shuffle=True, num_workers=0)
 
     model = GlucoseLSTM(X_all.shape[2]).to(device)
     criterion = nn.SmoothL1Loss()
@@ -118,6 +119,8 @@ def train_baseline_and_finetune(data_dir='data/ohio/2018/train_cleaned/',
     for epoch in tqdm(range(epochs_baseline), desc="Baseline Epochs"):
         model.train()
         for xb, yb in train_loader:
+            xb = xb.to(device)
+            yb = yb.to(device)
             optimizer.zero_grad()
             loss = criterion(model(xb), yb)
             loss.backward()
@@ -134,7 +137,8 @@ def train_baseline_and_finetune(data_dir='data/ohio/2018/train_cleaned/',
     X_train, X_test = X_target[:train_size].to(device), X_target[train_size:].to(device)
     y_train, y_test = y_target[:train_size].to(device), y_target[train_size:].to(device)
 
-    train_loader_target = DataLoader(TensorDataset(X_train, y_train), batch_size=batch_size, shuffle=True, num_workers=6)
+    # keep num_workers=0 to avoid CUDA init issues in worker processes
+    train_loader_target = DataLoader(TensorDataset(X_train, y_train), batch_size=batch_size, shuffle=True, num_workers=0)
 
     model.load_state_dict(torch.load(os.path.join(base_dir, "baseline_model.pth"), map_location=device))
     optimizer = torch.optim.Adam(model.parameters(), lr=lr * 0.5)
@@ -142,6 +146,8 @@ def train_baseline_and_finetune(data_dir='data/ohio/2018/train_cleaned/',
     for epoch in tqdm(range(epochs_finetune), desc="Finetune Epochs"):
         model.train()
         for xb, yb in train_loader_target:
+            xb = xb.to(device)
+            yb = yb.to(device)
             optimizer.zero_grad()
             loss = criterion(model(xb), yb)
             loss.backward()

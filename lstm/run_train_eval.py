@@ -4,6 +4,8 @@ import subprocess
 import argparse
 import numpy as np
 import shutil
+import glob
+import torch
 
 # ensure project root on path (parent of this 'lstm' folder)
 proj_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -27,8 +29,8 @@ def main():
     parser.add_argument("--test_file", type=str, default="559-ws-testing.csv", help="Filename inside test_cleaned/")
     parser.add_argument("--seq_len", type=int, default=50)
     parser.add_argument("--batch_size", type=int, default=128)
-    parser.add_argument("--epochs_baseline", type=int, default=15)
-    parser.add_argument("--epochs_finetune", type=int, default=10)
+    parser.add_argument("--epochs_baseline", type=int, default=25)
+    parser.add_argument("--epochs_finetune", type=int, default=20)
     parser.add_argument("--epochs_simple", type=int, default=15, help="Epochs for simple trainer")
     parser.add_argument("--lr", type=float, default=0.001)
     parser.add_argument("--max_horizon", type=int, default=12)
@@ -38,7 +40,11 @@ def main():
     args = parser.parse_args()
 
     os.makedirs(args.out_dir, exist_ok=True)
- 
+
+    # determine device once and reuse for loading/evaluation
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
+
     # create run folder with timestamp and subfolders for models+eval
     import datetime
     ts = datetime.datetime.now().strftime("%y%m%d-%H%M%S")
@@ -161,11 +167,13 @@ def main():
             continue
         try:
             print(f"Loading checkpoint for {name}: {ckpt}")
-            model, scaler = eval_mod._load_checkpoint_model(ckpt)
+            # load model directly onto selected device
+            model, scaler = eval_mod._load_checkpoint_model(ckpt, device=device)
             print(f"Running evaluate_on_file for {name} -> saving into {os.path.dirname(ckpt)}")
             target_out_dir = os.path.dirname(ckpt)
+            # model is already on `device`; pass same device to evaluation
             eval_mod.evaluate_on_file(model, test_file_path, scaler,
-                                      seq_len=args.seq_len, device=None,
+                                      seq_len=args.seq_len, device=device,
                                       max_horizon=args.max_horizon, out_dir=target_out_dir)
             # eval_on_file names: eval_{base_name}_{model_tag}_all{max_horizon}.csv
             base_name = os.path.basename(test_file_path).replace('.csv', '')
@@ -183,9 +191,9 @@ def main():
         if os.path.exists(args.model_ckpt) and args.model_ckpt not in ckpt_candidates.values():
             try:
                 print(f"Also evaluating provided --model_ckpt: {args.model_ckpt}")
-                model, scaler = eval_mod._load_checkpoint_model(args.model_ckpt)
+                model, scaler = eval_mod._load_checkpoint_model(args.model_ckpt, device=device)
                 eval_mod.evaluate_on_file(model, test_file_path, scaler,
-                                          seq_len=args.seq_len, device=None,
+                                          seq_len=args.seq_len, device=device,
                                           max_horizon=args.max_horizon, out_dir=os.path.dirname(args.model_ckpt))
                 eval_csv = os.path.join(os.path.dirname(args.model_ckpt),
                                         f"eval_{os.path.basename(test_file_path).replace('.csv','')}_all{args.max_horizon}.csv")
@@ -195,27 +203,29 @@ def main():
                 print("Failed to evaluate provided model_ckpt:", e)
 
     # Run resulttest on the produced eval CSVs
-    base_name = os.path.basename(test_file_path).replace('.csv', '')
-    candidates = {
-        "base_line": os.path.join(run_base, f"eval_{base_name}_{os.path.basename(run_base)}_all{args.max_horizon}.csv"),
-        "fine_tuned": os.path.join(run_finetune, f"eval_{base_name}_{os.path.basename(run_finetune)}_all{args.max_horizon}.csv"),
-        "single": os.path.join(run_single, f"eval_{base_name}_{os.path.basename(run_single)}_all{args.max_horizon}.csv")
-    }
-    print("Eval CSV candidates (post-eval):", candidates)
+    # collect any eval_*.csv files under each model folder (handles both no_future/with_future files)
+    eval_csvs = []
+    candidates = {}
+    for name, folder in (("base_line", run_base), ("fine_tuned", run_finetune), ("single", run_single)):
+        if os.path.isdir(folder):
+            found = sorted(glob.glob(os.path.join(folder, "eval_*.csv")))
+            candidates[name] = found
+            eval_csvs.extend(found)
+        else:
+            candidates[name] = []
+    
+    pretty = {k: [os.path.basename(p) for p in v] for k, v in candidates.items()}
+    print("Found eval CSVs per folder:", pretty)
 
-    # collect available eval CSVs and run combined comparison
-    eval_csvs = [p for p in candidates.values() if os.path.exists(p)]
     if not eval_csvs:
         print("No eval CSVs found to compare.")
     else:
         try:
             from lstm import resulttest
-            # pass run_dir so result CSVs are saved into the run folder
-            comp_res = resulttest.results(eval_csvs, out_path=run_dir)
-            # comp_res contains per_metrics, rmse_table, mae_table, summary, comparison
+            comp_res = resulttest.results(eval_csvs, out_path=os.path.join(run_dir, "comparison_metrics"))
         except Exception as e:
             print("Failed to run combined resulttest (import):", e)
-            # fallback: call CLI then move produced comparison_metrics into run_dir if present
+            # fallback to CLI invocation
             subprocess.check_call([sys.executable, os.path.join(proj_root, "lstm", "resulttest.py")] + eval_csvs)
             fallback_dir = os.path.join(os.path.dirname(eval_csvs[0]), "comparison_metrics")
             if os.path.exists(fallback_dir):
