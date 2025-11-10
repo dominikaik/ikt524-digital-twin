@@ -7,11 +7,13 @@ import importlib.util
 import numpy as np
 import uuid
 import pandas as pd
+import re
 
 # Paths
 DEFAULT_JSON = Path("/home/coder/digital_twin/twin/simulation_data/json/block_00042.json")
 TWIN_JSON_FILE = Path(__file__).resolve().parent / "twin_json.py"
-FUTURE_JSON_FILE = Path(__file__).resolve().parent / "simulation_data" / "json" / "future_block_00042.json"
+# FUTURE_JSON_FILE will be computed based on the selected data file (see upload block)
+FUTURE_JSON_FILE = None
 
 def load_json(path: Path):
     with path.open("r", encoding="utf-8") as f:
@@ -149,13 +151,49 @@ def build_future_preview(future_data, use_custom_cov, custom_bolus, custom_meal,
 # --- Streamlit App ---
 st.title("Glucose Forecast Dashboard")
 
-# --- Upload JSON ---
-uploaded_file = st.file_uploader("Upload JSON file", type="json")
+# --- Upload/select JSON (single selection; future filename is derived automatically) ---
+uploaded_file = st.file_uploader("Upload JSON file (leave empty to use default)", type="json")
+selected_data_path = None
 if uploaded_file:
-    data = json.load(uploaded_file)
+    # save uploaded file to /tmp so we can derive filename/number and reuse path
+    tmp_dir = Path("/tmp")
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    tmp_path = tmp_dir / f"uploaded_{uuid.uuid4().hex}_{uploaded_file.name}"
+    with tmp_path.open("wb") as f:
+        f.write(uploaded_file.getbuffer())
+    data = load_json(tmp_path)
+    selected_data_path = tmp_path
 else:
-    st.info(f"No file uploaded — using default: {DEFAULT_JSON}")
+    st.info(f"No file uploaded — using default: {DEFAULT_JSON.name}")
     data = load_json(DEFAULT_JSON)
+    selected_data_path = DEFAULT_JSON
+
+# --- Select JSON file from simulation_data/json (dropdown) ---
+json_dir = Path(__file__).resolve().parent / "simulation_data" / "json"
+json_dir.mkdir(parents=True, exist_ok=True)
+files = sorted([p.name for p in json_dir.glob("block_*.json")])
+
+# ensure default exists in the list (fallback to first file if not)
+default_name = "block_00042.json"
+if default_name not in files and files:
+    # try to pick a file that contains '00042' or just use first
+    fallback = next((n for n in files if "00042" in n), files[0])
+    default_name = fallback
+
+selected_name = st.selectbox("Select data block", options=files or [DEFAULT_JSON.name], index=(files.index(default_name) if files and default_name in files else 0))
+
+selected_data_path = json_dir / selected_name
+data = load_json(selected_data_path)
+
+# derive future file path from selected data filename (match numeric suffix)
+match = re.search(r"(\d+)", selected_data_path.name)
+if match:
+    num = match.group(1)
+    FUTURE_JSON_FILE = selected_data_path.parent / f"future_block_{num}.json"
+else:
+    FUTURE_JSON_FILE = Path(__file__).resolve().parent / "simulation_data" / "json" / "future_block_00042.json"
+
+st.write(f"Using data: {selected_name} — future block: {FUTURE_JSON_FILE.name}")
 
 # --- Load twin module ---
 try:
