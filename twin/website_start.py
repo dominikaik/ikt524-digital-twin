@@ -44,12 +44,20 @@ def render_plot(result, data, future_actuals=None):
     n_hist = len(hist_tail)
     x_hist = np.arange(-n_hist + 1, 1)  # e.g. -10..0
 
-    # predictions
-    pred_no_future = result.get("csv_no_future", []) or []
-    pred_with_future = result.get("csv_with_future", []) or []
-    pred_no_future = [float(x) for x in pred_no_future]
-    pred_with_future = [float(x) for x in pred_with_future]
-    H = max(len(pred_no_future), len(pred_with_future), 0)
+    # predictions: discover any sequence-like entries in the result and plot them
+    # collect any list/tuple/ndarray in result whose elements are numeric (convertible to float)
+    preds_dict = {}
+    H = 0
+    for k, v in result.items():
+        if isinstance(v, (list, tuple, np.ndarray)) and len(v) > 0:
+            try:
+                vals = [float(x) for x in v]
+            except Exception:
+                # skip non-numeric sequences
+                continue
+            preds_dict[k] = vals
+            H = max(H, len(vals))
+    model_keys = sorted(preds_dict.keys())
     x_pred = np.arange(1, H + 1)
 
     # Plot with Plotly: history on negative indices, predictions on positive indices
@@ -83,8 +91,13 @@ def render_plot(result, data, future_actuals=None):
             line=dict(color=color, dash=dash)
         ))
 
-    add_extended_trace(pred_no_future, "Prediction (no future)", "red", "dash")
-    add_extended_trace(pred_with_future, "Prediction (with future)", "blue", "dot")
+    # color / dash cycles for multiple model traces
+    colors = ["red", "blue", "green", "magenta", "cyan", "#FF7F0E"]
+    dashes = ["dash", "dot", "dashdot", "longdash", "solid"]
+    for i, k in enumerate(model_keys):
+        # use the key name as the legend label (clean underscores)
+        label = str(k).replace("_", " ").strip()
+        add_extended_trace(preds_dict.get(k, []), label, colors[i % len(colors)], dashes[i % len(dashes)])
 
     # overlay future actual glucose values (if provided) starting at x=1...
     if future_actuals:
