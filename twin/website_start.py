@@ -236,7 +236,7 @@ if not hasattr(twin_mod, "forecast"):
     st.error("twin_json.py does not contain a function `forecast(data)`")
     st.stop()
 
-# (Forecast-Aufruf wurde hier entfernt — wird weiter unten ausgeführt, damit UI-Optionen berücksichtigt werden)
+# (Forecast call removed here — it is executed below so UI options are considered)
 # --- Forecast computation ---
 try:
     result = twin_mod.forecast(data)
@@ -255,7 +255,7 @@ if FUTURE_JSON_FILE.exists():
     except Exception:
         future_raw = None
 
-# --- Control Panel über dem Plot ---
+# --- Control panel above the plot ---
 with st.expander("Controls / Settings", expanded=True):
     # stacked checkboxes (exactly one above the other) with visible note "#tobe fixed"
     show_future_actuals = st.checkbox("Overlay future actual glucose #tobe fixed", value=True)
@@ -351,11 +351,11 @@ finally:
         except Exception:
             pass
 
-# --- Placeholders für Plot und Tabelle ---
+# --- Placeholders for plot and table ---
 chart_container = st.empty()
 table_container = st.empty()
 
-# --- Re-run Forecast wenn Button geklickt ---
+# --- Re-run Forecast when button clicked ---
 if rerun_clicked:
     try:
         override_list = []
@@ -417,7 +417,7 @@ if rerun_clicked:
         if tmp_path.exists():
             tmp_path.unlink()
 
-# --- Initial Plot rendern ---
+# --- Initial plot render ---
 future_vals = [item.get("glucose_level") for item in future_raw] if (future_raw and show_future_actuals) else None
 fig = render_plot(result, data, future_actuals=future_vals)
 if fig is None:
@@ -434,7 +434,7 @@ if last_sent_future is not None:
     try:
         table_container.table(pd.DataFrame(last_sent_future)[["timestamp","glucose_level","bolus_dose","meal_carbs","basis_sleep_binary","exercise_intensity"]])
     except Exception:
-        table_container.write("Keine gesendeten Future-Daten zum Anzeigen.")
+        table_container.write("No sent future data to display.")
 else:
     # If user chose to use future-block actuals show those values in preview (including sleep/exercise)
     if use_future_actuals and future_raw:

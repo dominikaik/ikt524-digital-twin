@@ -154,10 +154,10 @@ def _make_profile(length_steps, at_step, magnitude, kernel_minutes, dt_min):
         w = w * (magnitude / w.sum())
     return w
 
-# --- Residual (Abklingprofil) Erweiterung ---
+# --- Residual (decay profile) extension ---
 def _make_residual_profile_from_past(df_now, feature, dt_min, peak_min, total_min, magnitude_scale=1.0):
-    """Erzeugt ein abklingendes Restprofil für vergangene Ereignisse.
-    Gibt immer ein Array der Länge MAX_HORIZON zurück (mit Nullen aufgefüllt)."""
+    """Create a decaying residual profile for past events.
+    Always returns an array of length MAX_HORIZON (padded with zeros)."""
     prof = np.zeros(MAX_HORIZON, dtype=float)
     idx_arr = df_now[feature].to_numpy().nonzero()[0]
     if len(idx_arr) == 0:
@@ -213,7 +213,7 @@ def simulate_meal_insulin_hybrid(
     carb_profile_feat  = _make_profile(steps, meal_at_step, meal_grams, (carb_peak_min, carb_total_min), dt_min)
     bolus_profile_feat = _make_profile(steps, bolus_at_step, bolus_units, (0.1, dt_min), dt_min)
 
-    # --- Residual (Abklingprofil) hinzufügen ---
+    # --- Add residual (decay) profiles ---
     carb_residual = _make_residual_profile_from_past(df_now, "meal_carbs", dt_min, carb_peak_min, carb_total_min, 1.0)
     bolus_residual = _make_residual_profile_from_past(df_now, "bolus_dose", dt_min, ins_peak_min, ins_total_min, 1.0)
     carb_profile_feat  = carb_profile_feat + carb_residual[:steps]
@@ -242,7 +242,7 @@ def simulate_meal_insulin_hybrid(
         tmp[:, g_idx_scaler] = y_scaled
         glu_mgdl = scaler.inverse_transform(tmp)[0, g_idx_scaler]
 
-        # physiologische Effekte (inkl. Abklingprofile)
+        # physiological effects (including residual decay profiles)
         glu_mgdl = glu_mgdl + carb_effect[step] - insulin_effect[step]
         glu_mgdl = glu_mgdl + carb_residual[step] * ISF_mgdl_per_U / max(CR_g_per_U, 1e-6)
         glu_mgdl = glu_mgdl - bolus_residual[step] * ISF_mgdl_per_U
@@ -299,10 +299,10 @@ def simulate_meal_insulin_hybrid_sleep_exercise(
     clip_glucose_to=(40, 400)
 ):
     """
-    Glucose rollout mit:
-      - Residualprofilen aus der Vergangenheit für carbs, bolus, exercise, sleep
-      - Optionalen zukünftigen Inputs für carbs, bolus, exercise, sleep
-      - Insulin-Sensitivitäts- und Drop-Profile für Exercise/Sleep
+    Glucose rollout including:
+      - Residual profiles from the past for carbs, bolus, exercise, sleep
+      - Optional future inputs for carbs, bolus, exercise, sleep
+      - Insulin-sensitivity and drop profiles for exercise/sleep
     """
     df_now = df_now.copy()
     for col in feature_names:
@@ -336,7 +336,7 @@ def simulate_meal_insulin_hybrid_sleep_exercise(
     insulin_effect   = _make_profile(steps, bolus_at_step, total_fall_mgdl,
                                      (ins_peak_min, ins_total_min), dt_min)
 
-    # --- RESIDUALPROFILE AUS VERGANGENHEIT ---
+    # --- Residual profiles from the past ---
     carb_residual  = _make_residual_profile_from_past(df_now, "meal_carbs", dt_min, carb_peak_min, carb_total_min, 1.0)
     bolus_residual = _make_residual_profile_from_past(df_now, "bolus_dose", dt_min, ins_peak_min, ins_total_min, 1.0)
     ex_residual    = _make_residual_profile_from_past(df_now, "exercise_intensity", dt_min, ex_drop_peak_min, ex_drop_total_min, 1.0)
@@ -386,7 +386,7 @@ def simulate_meal_insulin_hybrid_sleep_exercise(
 
     lo, hi = clip_glucose_to if clip_glucose_to else (None, None)
 
-    # addiere Residuals zu den zukünftigen Profilen
+    # Residu
     carb_profile_feat  = carb_profile_feat + carb_residual[:steps]
     bolus_profile_feat = bolus_profile_feat + bolus_residual[:steps]
     ex_profile_feat    = ex_profile_feat + ex_residual[:steps]
@@ -401,18 +401,18 @@ def simulate_meal_insulin_hybrid_sleep_exercise(
         tmp[:, g_idx] = y_scaled
         glu_mgdl = scaler.inverse_transform(tmp)[0, g_idx]
 
-        # Physiologische Effekte
+        # Physiological effects
         glu_mgdl = (
             glu_mgdl
-            + carb_effect[step]  # zukünftige Mahlzeit
-            - insulin_effect[step] * ISF_mult[step]  # zukünftiger Bolus mit Sleep/Exercise-Modifikation
+            + carb_effect[step]  # future meal
+            - insulin_effect[step] * ISF_mult[step]  # future bolus modified by sleep/exercise
         )
 
-        # Residuals aus der Vergangenheit für carbs und bolus
+        # Residuals of past events
         glu_mgdl += carb_residual[step] * ISF_mgdl_per_U / max(CR_g_per_U, 1e-6)
         glu_mgdl -= bolus_residual[step] * ISF_mgdl_per_U
 
-        # Schlaf- und Exercise-Effekte aus Residuals / Drop-Profilen
+        # Sleep and exercise effects from residuals / drop profiles
         glu_mgdl -= ex_drop_profile[step]
         glu_mgdl -= sleep_drop_profile[step]
         if lo is not None and hi is not None:
