@@ -8,9 +8,11 @@ import numpy as np
 import uuid
 import pandas as pd
 import re
+from pathlib import Path as _Path
+import numpy as _np
 
 # Paths
-DEFAULT_JSON = Path("/home/coder/digital_twin/twin/simulation_data/json/block_00042.json")
+DEFAULT_JSON = Path("/home/coder/digital_twin/twin/simulation_data/json/block_00006.json")
 TWIN_JSON_FILE = Path(__file__).resolve().parent / "twin_json.py"
 # FUTURE_JSON_FILE will be computed based on the selected data file (see upload block)
 FUTURE_JSON_FILE = None
@@ -122,7 +124,7 @@ def render_plot(result, data, future_actuals=None):
 
     return fig
 
-def build_future_preview(future_data, use_custom_cov, custom_bolus, custom_meal, custom_sleep, custom_exercise):
+def build_future_preview(future_data, apply_custom, custom_bolus, custom_meal, custom_sleep, custom_exercise):
     if not future_data:
         return None
     rows = []
@@ -130,23 +132,51 @@ def build_future_preview(future_data, use_custom_cov, custom_bolus, custom_meal,
         r = {}
         r["timestamp"] = item.get("timestamp")
         r["glucose_level"] = item.get("glucose_level")
-        if use_custom_cov and i == 0:
-            r["bolus_dose"] = float(custom_bolus)
-            r["meal_carbs"] = float(custom_meal)
-        else:
-            r["bolus_dose"] = float(item.get("bolus_dose", 0.0))
-            r["meal_carbs"] = float(item.get("meal_carbs", 0.0))
-        if use_custom_cov:
+        r["bolus_dose"] = float(custom_bolus) if (apply_custom and i == 0) else 0.0
+        r["meal_carbs"] = float(custom_meal) if (apply_custom and i == 0) else 0.0
+        # Sleep/Exercise must be zero unless custom override is enabled.
+        if apply_custom:
             r["basis_sleep_binary"] = int(custom_sleep)
             r["exercise_intensity"] = int(custom_exercise)
         else:
-            r["basis_sleep_binary"] = int(item.get("basis_sleep_binary", 0))
-            r["exercise_intensity"] = int(item.get("exercise_intensity", 0))
+            r["basis_sleep_binary"] = 0
+            r["exercise_intensity"] = 0
         rows.append(r)
     df = pd.DataFrame(rows)
     cols = ["timestamp", "glucose_level", "bolus_dose", "meal_carbs", "basis_sleep_binary", "exercise_intensity"]
     df = df[[c for c in cols if c in df.columns]]
     return df
+
+def _save_return_json(result):
+    """Save forecast result as JSON into the twin folder (return.json)."""
+    out_path = _Path(__file__).resolve().parent / "return.json"
+    def _make_serializable(x):
+        if isinstance(x, dict):
+            return {k: _make_serializable(v) for k, v in x.items()}
+        if isinstance(x, list):
+            return [_make_serializable(v) for v in x]
+        if isinstance(x, tuple):
+            return [_make_serializable(v) for v in x]
+        if isinstance(x, _np.ndarray):
+            return x.tolist()
+        try:
+            if isinstance(x, (float, int, str, bool, type(None))):
+                return x
+        except Exception:
+            pass
+        # numpy scalars
+        try:
+            if hasattr(x, "item"):
+                return x.item()
+        except Exception:
+            pass
+        return str(x)
+    try:
+        with out_path.open("w", encoding="utf-8") as _f:
+            json.dump(_make_serializable(result), _f, ensure_ascii=False, indent=2)
+    except Exception:
+        # don't break the app if saving fails
+        pass
 
 # --- Streamlit App ---
 st.title("Glucose Forecast Dashboard")
@@ -174,10 +204,10 @@ json_dir.mkdir(parents=True, exist_ok=True)
 files = sorted([p.name for p in json_dir.glob("block_*.json")])
 
 # ensure default exists in the list (fallback to first file if not)
-default_name = "block_00042.json"
+default_name = "block_00001.json"
 if default_name not in files and files:
-    # try to pick a file that contains '00042' or just use first
-    fallback = next((n for n in files if "00042" in n), files[0])
+    # try to pick a file that contains '00001' or just use first
+    fallback = next((n for n in files if "00001" in n), files[0])
     default_name = fallback
 
 selected_name = st.selectbox("Select data block", options=files or [DEFAULT_JSON.name], index=(files.index(default_name) if files and default_name in files else 0))
@@ -206,9 +236,11 @@ if not hasattr(twin_mod, "forecast"):
     st.error("twin_json.py does not contain a function `forecast(data)`")
     st.stop()
 
+# (Forecast-Aufruf wurde hier entfernt — wird weiter unten ausgeführt, damit UI-Optionen berücksichtigt werden)
 # --- Forecast computation ---
 try:
     result = twin_mod.forecast(data)
+    _save_return_json(result)
 except Exception as e:
     st.error(f"Error calling forecast(): {e}")
     st.stop()
@@ -225,23 +257,99 @@ if FUTURE_JSON_FILE.exists():
 
 # --- Control Panel über dem Plot ---
 with st.expander("Controls / Settings", expanded=True):
-    # Checkboxes
-    show_future_actuals = st.checkbox("Overlay future actual glucose", value=False)
-    use_custom_cov = st.checkbox("Use custom future covariates", value=False)
+    # stacked checkboxes (exactly one above the other) with visible note "#tobe fixed"
+    show_future_actuals = st.checkbox("Overlay future actual glucose #tobe fixed", value=True)
+    use_future_actuals = st.checkbox("Use future block actuals", value=False)
+    # custom_sleep_bool = st.checkbox("basis_sleep_binary (on/off)", value=False)
+    # convert checkbox bool to integer flag used elsewhere
+    
 
-    # Custom covariates input
-    custom_bolus, custom_meal, custom_sleep, custom_exercise = 0.0, 0.0, 0, 0
-    if use_custom_cov:
-        col1, col2 = st.columns(2)
-        with col1:
-            custom_bolus = st.number_input("Bolus dose (first future step)", value=0.0, step=0.5, format="%.2f")
-            custom_meal = st.number_input("Meal carbs (first future step)", value=0.0, step=10.0, format="%.1f")
-        with col2:
-            custom_sleep = 1 if st.checkbox("basis_sleep_binary (on/off)", value=False) else 0
-            custom_exercise = st.selectbox("exercise_intensity (0..3)", options=[0,1,2,3], index=0)
+    # Custom covariates inputs (bolus/meal/exercise) — layout below the stacked checkboxes
+    col1, col2 = st.columns(2)
+    with col1:
+        custom_bolus = st.number_input("Bolus dose", value=0.0, step=0.5, format="%.2f")
+        custom_meal = st.number_input("Meal carbs", value=0.0, step=10.0, format="%.1f")
+    with col2:
+        custom_exercise = st.selectbox("exercise_intensity", options=[0,1,2,3], index=0)
+        custom_sleep_bool = st.selectbox("basis_sleep_binary", options=[True,False], index=1)
+    custom_sleep = 1 if custom_sleep_bool else 0
+    # apply_custom is true when the user entered non-default values
+    apply_custom = (
+        (custom_bolus != 0.0)
+        or (custom_meal != 0.0)
+        or (custom_sleep != 0)
+        or (custom_exercise != 0)
+    )
 
     # Re-run Button
     rerun_clicked = st.button("Re-run forecast (recompute model predictions)")
+
+# --- Compute initial forecast respecting use_future_actuals / custom inputs ---
+# this ensures the checkbox state / custom inputs are taken into account on each Streamlit run
+result = None
+tmp_path_for_initial = None
+last_sent_future = None
+try:
+    # if user wants to use the future block actuals and the file exists -> pass it
+    if use_future_actuals and future_raw:
+        override_list = []
+        for item in future_raw:
+            new_item = {
+                "timestamp": item.get("timestamp"),
+                "glucose_level": item.get("glucose_level"),
+                "bolus_dose": float(item.get("bolus_dose", 0.0)),
+                "meal_carbs": float(item.get("meal_carbs", 0.0)),
+                "basis_sleep_binary": int(item.get("basis_sleep_binary", 0)),
+                "exercise_intensity": float(item.get("exercise_intensity", 0.0)),
+            }
+            override_list.append(new_item)
+        tmp_path_for_initial = Path("/tmp") / f"future_override_{uuid.uuid4().hex}.json"
+        tmp_path_for_initial.parent.mkdir(parents=True, exist_ok=True)
+        with tmp_path_for_initial.open("w", encoding="utf-8") as _f:
+            json.dump(override_list, _f, ensure_ascii=False, indent=2)
+        # save a copy in the twin folder for inspection
+        send_path = Path(__file__).resolve().parent / "send_future.json"
+        with send_path.open("w", encoding="utf-8") as _sf:
+            json.dump(override_list, _sf, ensure_ascii=False, indent=2)
+        last_sent_future = override_list
+        result = twin_mod.forecast(data, future_glob=str(tmp_path_for_initial))
+    else:
+        # if the user provided custom overrides (apply_custom) and we have a future_raw template, build and pass it
+        if apply_custom and (future_raw is not None):
+            override_list = []
+            for i, item in enumerate(future_raw):
+                new_item = {
+                    "timestamp": item.get("timestamp"),
+                    "glucose_level": item.get("glucose_level"),
+                    "bolus_dose": float(custom_bolus) if i == 0 else 0.0,
+                    "meal_carbs": float(custom_meal) if i == 0 else 0.0,
+                    "basis_sleep_binary": int(custom_sleep) if apply_custom else 0,
+                    "exercise_intensity": int(custom_exercise) if apply_custom else 0,
+                }
+                override_list.append(new_item)
+            tmp_path_for_initial = Path("/tmp") / f"future_override_{uuid.uuid4().hex}.json"
+            tmp_path_for_initial.parent.mkdir(parents=True, exist_ok=True)
+            with tmp_path_for_initial.open("w", encoding="utf-8") as _f:
+                json.dump(override_list, _f, ensure_ascii=False, indent=2)
+            # save a copy in the twin folder for inspection
+            send_path = Path(__file__).resolve().parent / "send_future.json"
+            with send_path.open("w", encoding="utf-8") as _sf:
+                json.dump(override_list, _sf, ensure_ascii=False, indent=2)
+            last_sent_future = override_list
+            result = twin_mod.forecast(data, future_glob=str(tmp_path_for_initial))
+        else:
+            # default: call forecast without future_glob
+            result = twin_mod.forecast(data)
+    _save_return_json(result)
+except Exception as e:
+    st.error(f"Error calling forecast(): {e}")
+    st.stop()
+finally:
+    if tmp_path_for_initial and tmp_path_for_initial.exists():
+        try:
+            tmp_path_for_initial.unlink()
+        except Exception:
+            pass
 
 # --- Placeholders für Plot und Tabelle ---
 chart_container = st.empty()
@@ -251,29 +359,52 @@ table_container = st.empty()
 if rerun_clicked:
     try:
         override_list = []
-        for i, item in enumerate(future_raw or []):
-            new_item = {}
-            new_item["timestamp"] = item.get("timestamp")
-            new_item["glucose_level"] = item.get("glucose_level")
-            if use_custom_cov and i == 0:
-                new_item["bolus_dose"] = float(custom_bolus)
-                new_item["meal_carbs"] = float(custom_meal)
-            else:
-                new_item["bolus_dose"] = float(item.get("bolus_dose", 0.0))
-                new_item["meal_carbs"] = float(item.get("meal_carbs", 0.0))
-            new_item["basis_sleep_binary"] = int(custom_sleep)
-            new_item["exercise_intensity"] = int(custom_exercise)
-            override_list.append(new_item)
+        if use_future_actuals and future_raw:
+            # take values directly from future block (use 0 defaults when missing)
+            for item in future_raw:
+                new_item = {
+                    "timestamp": item.get("timestamp"),
+                    "glucose_level": item.get("glucose_level"),
+                    "bolus_dose": float(item.get("bolus_dose", 0.0)),
+                    "meal_carbs": float(item.get("meal_carbs", 0.0)),
+                    "basis_sleep_binary": int(item.get("basis_sleep_binary", 0)),
+                    "exercise_intensity": float(item.get("exercise_intensity", 0.0)),
+                }
+                override_list.append(new_item)
+        else:
+            # build override from UI custom inputs (or zeros)
+            for i, item in enumerate(future_raw or []):
+                new_item = {}
+                new_item["timestamp"] = item.get("timestamp")
+                new_item["glucose_level"] = item.get("glucose_level")
+                new_item["bolus_dose"] = float(custom_bolus) if (apply_custom and i == 0) else 0.0
+                new_item["meal_carbs"] = float(custom_meal) if (apply_custom and i == 0) else 0.0
+                if apply_custom:
+                    new_item["basis_sleep_binary"] = int(custom_sleep)
+                    new_item["exercise_intensity"] = int(custom_exercise)
+                else:
+                    new_item["basis_sleep_binary"] = 0
+                    new_item["exercise_intensity"] = 0
+                override_list.append(new_item)
 
         tmp_path = Path("/tmp") / f"future_override_{uuid.uuid4().hex}.json"
         tmp_path.parent.mkdir(parents=True, exist_ok=True)
         with tmp_path.open("w", encoding="utf-8") as f:
             json.dump(override_list, f, ensure_ascii=False, indent=2)
 
+        # save a copy in the twin folder for inspection before calling forecast
+        send_path = Path(__file__).resolve().parent / "send_future.json"
+        with send_path.open("w", encoding="utf-8") as _sf:
+            json.dump(override_list, _sf, ensure_ascii=False, indent=2)
+        last_sent_future = override_list
+
         result = twin_mod.forecast(data, future_glob=str(tmp_path))
+        _save_return_json(result)
+
         st.success("Forecast re-run complete.")
 
-        fig = render_plot(result, data, future_actuals=[item.get("glucose_level") for item in future_raw] if future_raw else None)
+        future_vals = [item.get("glucose_level") for item in future_raw] if (future_raw and show_future_actuals) else None
+        fig = render_plot(result, data, future_actuals=future_vals)
         if fig is None:
             chart_container.write("Cannot build plot after re-run: no valid historical glucose found.")
         else:
@@ -287,16 +418,44 @@ if rerun_clicked:
             tmp_path.unlink()
 
 # --- Initial Plot rendern ---
-fig = render_plot(result, data, future_actuals=[item.get("glucose_level") for item in future_raw] if future_raw else None)
+future_vals = [item.get("glucose_level") for item in future_raw] if (future_raw and show_future_actuals) else None
+fig = render_plot(result, data, future_actuals=future_vals)
 if fig is None:
     chart_container.write("Cannot build plot: no valid historical glucose found.")
 else:
     chart_container.plotly_chart(fig, width="stretch", key=f"forecast_plot_{uuid.uuid4().hex}")
 
 # --- Show future preview ---
-preview_df = build_future_preview(future_raw, use_custom_cov, custom_bolus, custom_meal, custom_sleep, custom_exercise)
-st.markdown("**Configured future (preview of values used for override):**")
-if preview_df is None or preview_df.empty:
-    table_container.write("No future block available to preview.")
+# prepare preview_df from UI inputs (used when not showing future-block actuals)
+preview_df = build_future_preview(future_raw, apply_custom, custom_bolus, custom_meal, custom_sleep, custom_exercise)
+
+# If there is a last_sent_future prefer showing that (it reflects what was actually passed to forecast)
+if last_sent_future is not None:
+    try:
+        table_container.table(pd.DataFrame(last_sent_future)[["timestamp","glucose_level","bolus_dose","meal_carbs","basis_sleep_binary","exercise_intensity"]])
+    except Exception:
+        table_container.write("Keine gesendeten Future-Daten zum Anzeigen.")
 else:
-    table_container.table(preview_df)
+    # If user chose to use future-block actuals show those values in preview (including sleep/exercise)
+    if use_future_actuals and future_raw:
+        try:
+            # normalize future_raw into DataFrame with expected columns
+            preview_df2 = pd.DataFrame(future_raw)
+            for c in ("timestamp", "glucose_level", "bolus_dose", "meal_carbs", "basis_sleep_binary", "exercise_intensity"):
+                if c not in preview_df2.columns:
+                    preview_df2[c] = 0
+            preview_df2["bolus_dose"] = preview_df2["bolus_dose"].astype(float)
+            preview_df2["meal_carbs"] = preview_df2["meal_carbs"].astype(float)
+            preview_df2["basis_sleep_binary"] = preview_df2["basis_sleep_binary"].astype(int)
+            preview_df2["exercise_intensity"] = preview_df2["exercise_intensity"].astype(float)
+            table_container.table(preview_df2[["timestamp","glucose_level","bolus_dose","meal_carbs","basis_sleep_binary","exercise_intensity"]])
+        except Exception:
+            table_container.write("No future block available to preview.")
+    else:
+        if preview_df is None or preview_df.empty:
+            table_container.write("No future block available to preview.")
+        else:
+            # show only the columns that actually exist to avoid KeyError
+            cols = ["timestamp","glucose_level","bolus_dose","meal_carbs","basis_sleep_binary","exercise_intensity"]
+            available = [c for c in cols if c in preview_df.columns]
+            table_container.table(preview_df[available])

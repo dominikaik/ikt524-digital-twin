@@ -120,7 +120,7 @@ def evaluate_on_file(model, file_path, scaler, seq_len, device=None, max_horizon
 
     df_raw = pd.read_csv(file_path)
     # build features; ensure the ordering matches training (glucose, bolus, meal_carbs, meal_indicator, glucose_change)
-    df = df_raw[['glucose_level', 'bolus_dose', 'meal_carbs']].fillna(0)
+    df = df_raw[['glucose_level', 'bolus_dose', 'meal_carbs', 'exercise_intensity', 'basis_sleep_binary']].fillna(0)
     df['meal_indicator'] = (df['meal_carbs'] > 0).astype(float)
     df['glucose_change'] = df['glucose_level'].diff().fillna(0)
 

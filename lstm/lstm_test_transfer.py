@@ -16,7 +16,7 @@ input_size = 5
 # Helper function to load data
 def load_ohio_data(filepath, seq_len=50, pred_step=3):
     df = pd.read_csv(filepath)
-    df = df[['glucose_level', 'bolus_dose', 'meal_carbs']].fillna(0)
+    df = df[['glucose_level', 'bolus_dose', 'meal_carbs', 'exercise_intensity', 'basis_sleep_binary']].fillna(0)
     df['meal_indicator'] = (df['meal_carbs'] > 0).astype(float)
     df['glucose_change'] = df['glucose_level'].diff().fillna(0)
 
