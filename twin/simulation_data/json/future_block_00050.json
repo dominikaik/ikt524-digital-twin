@@ -1,0 +1,98 @@
+[
+  {
+    "timestamp": "2022-01-26 20:30:00",
+    "bolus_dose": 0.0,
+    "exercise_intensity": 0,
+    "basis_sleep_binary": 0,
+    "glucose_level": 215.4814814814815,
+    "meal_carbs": 0
+  },
+  {
+    "timestamp": "2022-01-26 20:35:00",
+    "bolus_dose": 0.0,
+    "exercise_intensity": 0,
+    "basis_sleep_binary": 0,
+    "glucose_level": 213.94444444444449,
+    "meal_carbs": 0
+  },
+  {
+    "timestamp": "2022-01-26 20:40:00",
+    "bolus_dose": 0.0,
+    "exercise_intensity": 0,
+    "basis_sleep_binary": 0,
+    "glucose_level": 212.40740740740745,
+    "meal_carbs": 0
+  },
+  {
+    "timestamp": "2022-01-26 20:45:00",
+    "bolus_dose": 0.0,
+    "exercise_intensity": 0,
+    "basis_sleep_binary": 0,
+    "glucose_level": 210.8703703703704,
+    "meal_carbs": 0
+  },
+  {
+    "timestamp": "2022-01-26 20:50:00",
+    "bolus_dose": 0.0,
+    "exercise_intensity": 0,
+    "basis_sleep_binary": 0,
+    "glucose_level": 209.33333333333331,
+    "meal_carbs": 0
+  },
+  {
+    "timestamp": "2022-01-26 20:55:00",
+    "bolus_dose": 0.0,
+    "exercise_intensity": 0,
+    "basis_sleep_binary": 0,
+    "glucose_level": 207.7962962962963,
+    "meal_carbs": 0
+  },
+  {
+    "timestamp": "2022-01-26 21:00:00",
+    "bolus_dose": 0.0,
+    "exercise_intensity": 0,
+    "basis_sleep_binary": 0,
+    "glucose_level": 206.25925925925927,
+    "meal_carbs": 0
+  },
+  {
+    "timestamp": "2022-01-26 21:05:00",
+    "bolus_dose": 0.0,
+    "exercise_intensity": 0,
+    "basis_sleep_binary": 0,
+    "glucose_level": 204.72222222222223,
+    "meal_carbs": 0
+  },
+  {
+    "timestamp": "2022-01-26 21:10:00",
+    "bolus_dose": 0.0,
+    "exercise_intensity": 0,
+    "basis_sleep_binary": 0,
+    "glucose_level": 203.1851851851852,
+    "meal_carbs": 0
+  },
+  {
+    "timestamp": "2022-01-26 21:15:00",
+    "bolus_dose": 0.0,
+    "exercise_intensity": 0,
+    "basis_sleep_binary": 0,
+    "glucose_level": 201.64814814814812,
+    "meal_carbs": 0
+  },
+  {
+    "timestamp": "2022-01-26 21:20:00",
+    "bolus_dose": 0.0,
+    "exercise_intensity": 0,
+    "basis_sleep_binary": 0,
+    "glucose_level": 200.11111111111111,
+    "meal_carbs": 0
+  },
+  {
+    "timestamp": "2022-01-26 21:25:00",
+    "bolus_dose": 0.0,
+    "exercise_intensity": 0,
+    "basis_sleep_binary": 0,
+    "glucose_level": 198.57407407407408,
+    "meal_carbs": 0
+  }
+]
