@@ -9,6 +9,7 @@ import pandas as pd
 import torch
 import torch.nn as nn
 import joblib
+from sklearn.preprocessing import StandardScaler
 
 def _align_df_to_scaler(df: pd.DataFrame, scaler):
     """
@@ -33,9 +34,9 @@ def _align_df_to_scaler(df: pd.DataFrame, scaler):
     return out[feat]
 
 # ------------------ DEFAULT PATHS ------------------
-DEFAULT_JSON = Path("/home/coder/digital_twin/twin/simulation_data/json/block_00000.json")
-DEFAULT_FUTURE_GLOB = "/home/coder/digital_twin/twin/simulation_data/json/future_block_*.json"
-DEFAULT_CKPT = Path("/home/coder/digital_twin/twin/simulation_data/models/lstm_model_finetuned_559-ws-training.pth")
+DEFAULT_JSON = Path("./simulation_data/json/block_00000.json")
+DEFAULT_FUTURE_GLOB = "./simulation_data/json/future_block_*.json"
+DEFAULT_CKPT = Path("./simulation_data/models/lstm_model_finetuned_559-ws-training.pth")
 SEQ_LEN = 50
 MAX_HORIZON = 12
 
@@ -65,7 +66,8 @@ class GlucoseLSTM(nn.Module):
 
 # ------------------ MODEL LOADING ------------------
 def _load_model_and_scaler(ckpt_path, device):
-    ckpt = torch.load(str(ckpt_path), map_location=device)
+    with torch.serialization.safe_globals([StandardScaler]):
+        ckpt = torch.load(str(ckpt_path), map_location=device, weights_only=False)
     scaler = None
     state_dict = None
 

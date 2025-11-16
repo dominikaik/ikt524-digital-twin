@@ -12,7 +12,7 @@ from pathlib import Path as _Path
 import numpy as _np
 
 # Paths
-DEFAULT_JSON = Path("/home/coder/digital_twin/twin/simulation_data/json/block_00006.json")
+DEFAULT_JSON = Path("./simulation_data/json/block_00006.json")
 TWIN_JSON_FILE = Path(__file__).resolve().parent / "twin_json.py"
 # FUTURE_JSON_FILE will be computed based on the selected data file (see upload block)
 FUTURE_JSON_FILE = None
