@@ -239,7 +239,8 @@ if not hasattr(twin_mod, "forecast"):
 # (Forecast call removed here — it is executed below so UI options are considered)
 # --- Forecast computation ---
 try:
-    result = twin_mod.forecast(data)
+    # call forecast without future by default (explicit None)
+    result = twin_mod.forecast(data, future_json=None)
     _save_return_json(result)
 except Exception as e:
     st.error(f"Error calling forecast(): {e}")
@@ -287,10 +288,8 @@ with st.expander("Controls / Settings", expanded=True):
 # --- Compute initial forecast respecting use_future_actuals / custom inputs ---
 # this ensures the checkbox state / custom inputs are taken into account on each Streamlit run
 result = None
-tmp_path_for_initial = None
 last_sent_future = None
 try:
-    # if user wants to use the future block actuals and the file exists -> pass it
     if use_future_actuals and future_raw:
         override_list = []
         for item in future_raw:
@@ -303,18 +302,14 @@ try:
                 "exercise_intensity": float(item.get("exercise_intensity", 0.0)),
             }
             override_list.append(new_item)
-        tmp_path_for_initial = Path("/tmp") / f"future_override_{uuid.uuid4().hex}.json"
-        tmp_path_for_initial.parent.mkdir(parents=True, exist_ok=True)
-        with tmp_path_for_initial.open("w", encoding="utf-8") as _f:
-            json.dump(override_list, _f, ensure_ascii=False, indent=2)
         # save a copy in the twin folder for inspection
         send_path = Path(__file__).resolve().parent / "send_future.json"
         with send_path.open("w", encoding="utf-8") as _sf:
             json.dump(override_list, _sf, ensure_ascii=False, indent=2)
         last_sent_future = override_list
-        result = twin_mod.forecast(data, future_glob=str(tmp_path_for_initial))
+        # pass the future JSON object (not a path)
+        result = twin_mod.forecast(data, future_json=override_list)
     else:
-        # if the user provided custom overrides (apply_custom) and we have a future_raw template, build and pass it
         if apply_custom and (future_raw is not None):
             override_list = []
             for i, item in enumerate(future_raw):
@@ -327,29 +322,20 @@ try:
                     "exercise_intensity": int(custom_exercise) if apply_custom else 0,
                 }
                 override_list.append(new_item)
-            tmp_path_for_initial = Path("/tmp") / f"future_override_{uuid.uuid4().hex}.json"
-            tmp_path_for_initial.parent.mkdir(parents=True, exist_ok=True)
-            with tmp_path_for_initial.open("w", encoding="utf-8") as _f:
-                json.dump(override_list, _f, ensure_ascii=False, indent=2)
             # save a copy in the twin folder for inspection
             send_path = Path(__file__).resolve().parent / "send_future.json"
             with send_path.open("w", encoding="utf-8") as _sf:
                 json.dump(override_list, _sf, ensure_ascii=False, indent=2)
             last_sent_future = override_list
-            result = twin_mod.forecast(data, future_glob=str(tmp_path_for_initial))
+            # pass the future JSON object (not a path)
+            result = twin_mod.forecast(data, future_json=override_list)
         else:
-            # default: call forecast without future_glob
-            result = twin_mod.forecast(data)
+            # default: call forecast without future_json
+            result = twin_mod.forecast(data, future_json=None)
     _save_return_json(result)
 except Exception as e:
     st.error(f"Error calling forecast(): {e}")
     st.stop()
-finally:
-    if tmp_path_for_initial and tmp_path_for_initial.exists():
-        try:
-            tmp_path_for_initial.unlink()
-        except Exception:
-            pass
 
 # --- Placeholders for plot and table ---
 chart_container = st.empty()
@@ -360,7 +346,6 @@ if rerun_clicked:
     try:
         override_list = []
         if use_future_actuals and future_raw:
-            # take values directly from future block (use 0 defaults when missing)
             for item in future_raw:
                 new_item = {
                     "timestamp": item.get("timestamp"),
@@ -372,7 +357,6 @@ if rerun_clicked:
                 }
                 override_list.append(new_item)
         else:
-            # build override from UI custom inputs (or zeros)
             for i, item in enumerate(future_raw or []):
                 new_item = {}
                 new_item["timestamp"] = item.get("timestamp")
@@ -387,18 +371,14 @@ if rerun_clicked:
                     new_item["exercise_intensity"] = 0
                 override_list.append(new_item)
 
-        tmp_path = Path("/tmp") / f"future_override_{uuid.uuid4().hex}.json"
-        tmp_path.parent.mkdir(parents=True, exist_ok=True)
-        with tmp_path.open("w", encoding="utf-8") as f:
-            json.dump(override_list, f, ensure_ascii=False, indent=2)
-
         # save a copy in the twin folder for inspection before calling forecast
         send_path = Path(__file__).resolve().parent / "send_future.json"
         with send_path.open("w", encoding="utf-8") as _sf:
             json.dump(override_list, _sf, ensure_ascii=False, indent=2)
         last_sent_future = override_list
 
-        result = twin_mod.forecast(data, future_glob=str(tmp_path))
+        # pass the future JSON object (not a path)
+        result = twin_mod.forecast(data, future_json=override_list)
         _save_return_json(result)
 
         st.success("Forecast re-run complete.")
@@ -414,8 +394,7 @@ if rerun_clicked:
             table_container.table(pd.DataFrame(override_list))
 
     finally:
-        if tmp_path.exists():
-            tmp_path.unlink()
+        pass
 
 # --- Initial plot render ---
 future_vals = [item.get("glucose_level") for item in future_raw] if (future_raw and show_future_actuals) else None

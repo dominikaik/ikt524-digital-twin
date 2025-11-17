@@ -447,7 +447,7 @@ def simulate_meal_insulin_hybrid_sleep_exercise(
 
 
 # ------------------ FORECAST ------------------
-def forecast(data, ckpt_path: str | Path = None, future_glob: str = DEFAULT_FUTURE_GLOB):
+def forecast(data, ckpt_path: str | Path = None, future_glob: str = DEFAULT_FUTURE_GLOB, future_json: list | None = None):
     if not isinstance(data, (list, tuple)) or len(data) == 0:
         return {"error": "input must be a non-empty list"}
 
@@ -473,22 +473,43 @@ def forecast(data, ckpt_path: str | Path = None, future_glob: str = DEFAULT_FUTU
     init_scaled_aligned = _align_df_to_scaler(init_scaled, scaler)
     init_scaled_tensor = torch.tensor(scaler.transform(init_scaled_aligned), dtype=torch.float32)
 
-    # --- FUTURE COVARIATES & Digital-Twin Parameter ---
+    # --- FUTURE COVARIATES & Digital-Twin Parameters ---
     future_cov_scaled = None
     meal_at_step = None
     meal_grams = 0
     bolus_at_step = None
     bolus_units = 0
-
-    future_candidates = sorted(glob.glob(future_glob))
     ex_schedule = None
     sleep_schedule = None
-    if future_candidates:
+
+    # prefer explicit future_json (passed as Python list) over glob lookup
+    future_data = None
+    if future_json is not None:
+        # accept a list/tuple of dicts or a JSON string
+        if isinstance(future_json, (list, tuple)):
+            future_data = list(future_json)
+        else:
+            try:
+                future_data = json.loads(future_json) if isinstance(future_json, str) else None
+            except Exception:
+                future_data = None
+
+    # fallback: search filesystem using future_glob
+    if future_data is None:
+        future_candidates = sorted(glob.glob(future_glob))
+        if future_candidates:
+            try:
+                with open(future_candidates[0], "r", encoding="utf-8") as f:
+                    future_data = json.load(f)
+            except Exception:
+                future_data = None
+
+    # if we have future data (from argument or file), prepare covariates and schedules
+    if future_data:
         try:
-            with open(future_candidates[0], "r", encoding="utf-8") as f:
-                future_data = json.load(f)
             df_future = _prepare_df_from_list(future_data)
             df_future_aligned = _align_df_to_scaler(df_future, scaler)
+            # covariates used by the iterative predictor -> columns bolus, meal, exercise
             future_cov_scaled = scaler.transform(df_future_aligned)[:, 1:4]
 
             meal_idx_arr = df_future["meal_carbs"].to_numpy().nonzero()[0]
@@ -513,6 +534,7 @@ def forecast(data, ckpt_path: str | Path = None, future_glob: str = DEFAULT_FUTU
 
         except Exception:
             future_cov_scaled = None
+
     preds_no_future = _predict_iteratively_local(model, init_scaled_tensor, steps=MAX_HORIZON, scaler=scaler, future_covariates_scaled=None, device=device)
     preds_with_future = _predict_iteratively_local(model, init_scaled_tensor, steps=MAX_HORIZON, scaler=scaler, future_covariates_scaled=future_cov_scaled, device=device)
 

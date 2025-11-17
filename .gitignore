@@ -1,5 +1,29 @@
-plots_lstm/
+# Ignore Python virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Bytecode / caches
 __pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Common folders/files to ignore
+.Python
+build/
+dist/
+*.egg-info/
+.installed.cfg
+.mypy_cache/
+.pytest_cache/
+.ipynb_checkpoints
+.env
+.vscode/
+
+# Ignore LSTM plots and Ohio data cache
+plots_lstm/
 digital_twin/data/ohio/__pycache__/
 digital_twin/lstm/__pycache__/
 digital_twin/lstm/plots_lstm/
