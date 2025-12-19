@@ -7,7 +7,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-DEFAULT_JSON = Path("/home/coder/digital_twin/twin/simulation_data/json/block_00000.json")
+DEFAULT_JSON = Path("./simulation_data/json/block_00000.json")
 TWIN_JSON_FILE = Path(__file__).resolve().parent / "twin_json.py"
 
 
