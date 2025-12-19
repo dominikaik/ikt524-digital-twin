@@ -36,32 +36,48 @@ const useForecast = () => {
     error: null,
   });
 
-  // Transform API response to chart data
+  // Transform API response to chart data - FIXED VERSION
   const transformToChartData = useCallback((response: ForecastResponse): ChartDataPoint[] => {
-    const chartPoints: ChartDataPoint[] = [];
-
+    // Create a map to merge historical and prediction data by time
+    const dataMap = new Map<number, ChartDataPoint>();
+    
     // Add historical points
     response.historical.x.forEach((x, i) => {
-      chartPoints.push({
-        time: x,
+      const time = x;
+      dataMap.set(time, {
+        time,
         history: response.historical.y[i],
       });
     });
 
-    // Add prediction points
+    // Add prediction points - merge with existing time points or create new ones
     response.predictions.x.forEach((x, i) => {
-      const point: ChartDataPoint = { time: x };
+      const time = x;
+      const existingPoint = dataMap.get(time);
       
-      // Add all prediction series
-      Object.entries(response.predictions.series).forEach(([key, values]) => {
-        if (values && values[i] !== undefined) {
-          point[key] = values[i];
-        }
-      });
-      
-      chartPoints.push(point);
+      if (existingPoint) {
+        // Merge prediction data with existing historical data
+        Object.entries(response.predictions.series).forEach(([key, values]) => {
+          if (values && values[i] !== undefined && values[i] !== null) {
+            existingPoint[key] = values[i];
+          }
+        });
+      } else {
+        // Create new point for prediction-only data
+        const point: ChartDataPoint = { time };
+        Object.entries(response.predictions.series).forEach(([key, values]) => {
+          if (values && values[i] !== undefined && values[i] !== null) {
+            point[key] = values[i];
+          }
+        });
+        dataMap.set(time, point);
+      }
     });
 
+    // Convert map to sorted array
+    const chartPoints = Array.from(dataMap.values()).sort((a, b) => a.time - b.time);
+    
+    console.log("Transformed chart data:", chartPoints);
     return chartPoints;
   }, []);
 
@@ -74,14 +90,15 @@ const useForecast = () => {
     }
 
     // Short term: 10 min ahead (step 2, since step 0 is current)
-    const shortTerm = primarySeries[2] || primarySeries[0];
+    const shortTermIndex = Math.min(2, primarySeries.length - 1);
+    const shortTerm = primarySeries[shortTermIndex];
     
     // Long term: 60 min ahead (last step)
     const longTerm = primarySeries[primarySeries.length - 1];
 
     return {
-      shortTerm: `${shortTerm.toFixed(1)} mg/dL (10 min)`,
-      longTerm: `${longTerm.toFixed(1)} mg/dL (60 min)`,
+      shortTerm: `Expected glucose: ${shortTerm.toFixed(1)} mg/dL (10 min)`,
+      longTerm: `Expected glucose: ${longTerm.toFixed(1)} mg/dL (60 min)`,
     };
   }, []);
 
@@ -95,6 +112,11 @@ const useForecast = () => {
       // Transform data
       const chartData = transformToChartData(response);
       const predictions = calculatePredictions(response.predictions.series);
+
+      console.log("API RESPONSE:", response);
+      console.log("PREDICTION SERIES:", response.predictions.series);
+      console.log("HISTORICAL DATA:", response.historical);
+      console.log("CHART DATA:", chartData);
 
       setState({
         chartData,

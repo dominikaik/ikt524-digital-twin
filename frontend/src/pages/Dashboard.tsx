@@ -1,4 +1,4 @@
-// src/pages/Dashboard.tsx
+// src/pages/Dashboard.tsx - FIXED VERSION
 import { useState } from "react";
 import { RefreshCw, AlertCircle } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
@@ -52,7 +52,6 @@ const Dashboard = () => {
   const [viewMode, setViewMode] = useState<ViewMode>("input");
 
   // Form inputs
-  const [currentGlucose, setCurrentGlucose] = useState("");
   const [insulin, setInsulin] = useState("");
   const [food, setFood] = useState("");
   const [exercise, setExercise] = useState(true);
@@ -70,7 +69,6 @@ const Dashboard = () => {
       await forecast.generateForecast({
         filename: fileManager.selectedFile,
         customInputs: {
-          glucose: parseFloat(currentGlucose) || 0,
           bolus: parseFloat(insulin) || 0,
           meal: parseFloat(food) || 0,
           exercise: exercise ? 1 : 0,
@@ -80,41 +78,159 @@ const Dashboard = () => {
       });
 
       setViewMode("results");
-      alert("Forecast generated successfully!");
+      //alert("Forecast generated successfully!");
     } catch (error) {
       console.error("Forecast error:", error);
-      alert("Failed to generate forecast. Please try again.");
+      //alert("Failed to generate forecast. Please try again.");
     }
   };
 
-
-  // Render chart lines using CSV structure
+  // Render chart lines - FIXED VERSION with proper dataKey capitalization
   const renderLines = () => {
+    const lines = [
+      <Line 
+        key="history" 
+        type="monotone" 
+        dataKey="history" 
+        stroke="#FFA500" 
+        strokeWidth={3} 
+        name="Historical Glucose" 
+        connectNulls={false}
+      />
+    ];
+
     switch (graphView) {
       case "glucose":
-        return (
-          <>
-            <Line type="monotone" dataKey="csv_no_future" stroke="#EF4444" strokeWidth={2} strokeDasharray="5 5" name="Baseline" />
-            <Line type="monotone" dataKey="csv_with_future" stroke="#3B82F6" strokeWidth={2} strokeDasharray="3 3" name="With Future" />
-          </>
+        lines.push(
+          <Line 
+            key="csv_no_future"
+            type="monotone" 
+            dataKey="csv_no_future" 
+            stroke="#EF4444" 
+            strokeWidth={2} 
+            strokeDasharray="5 5" 
+            name="Baseline Forecast" 
+            connectNulls={true}
+          />,
+          <Line 
+            key="csv_with_future"
+            type="monotone" 
+            dataKey="csv_with_future" 
+            stroke="#3B82F6" 
+            strokeWidth={2} 
+            strokeDasharray="3 3" 
+            name="With Future Data" 
+            connectNulls={true}
+          />
         );
+        break;
       case "food":
-        return <Line type="monotone" dataKey="d_t_bolus_carbs" stroke="#22c55e" strokeWidth={2} name="Meal + Insulin" />;
+        lines.push(
+          <Line 
+            key="d_t_bolus_carbs"
+            type="monotone" 
+            dataKey="d_t_bolus_carbs" 
+            stroke="#22c55e" 
+            strokeWidth={2} 
+            name="Meal + Insulin" 
+            connectNulls={true}
+          />
+        );
+        break;
       case "exercise":
-        return <Line type="monotone" dataKey="d_t_bolus_carbs_sleep_exercise" stroke="#06b6d4" strokeWidth={2} name="With Exercise" />;
+        lines.push(
+          <Line 
+            key="d_t_bolus_carbs_sleep_exercise"
+            type="monotone" 
+            dataKey="d_t_bolus_carbs_sleep_exercise" 
+            stroke="#06b6d4" 
+            strokeWidth={2} 
+            name="With Exercise" 
+            connectNulls={true}
+          />
+        );
+        break;
       case "sleep":
-        return <Line type="monotone" dataKey="d_t_bolus_carbs_sleep_exercise" stroke="#9333ea" strokeWidth={2} name="With Sleep" />;
+        lines.push(
+          <Line 
+            key="d_t_bolus_carbs_sleep_exercise_sleep"
+            type="monotone" 
+            dataKey="d_t_bolus_carbs_sleep_exercise" 
+            stroke="#9333ea" 
+            strokeWidth={2} 
+            name="With Sleep" 
+            connectNulls={true}
+          />
+        );
+        break;
       default:
-        return (
-          <>
-            <Line type="monotone" dataKey="csv_no_future" stroke="#EF4444" strokeWidth={2} strokeDasharray="5 5" name="Baseline" />
-            <Line type="monotone" dataKey="csv_with_future" stroke="#3B82F6" strokeWidth={2} strokeDasharray="3 3" name="With Future" />
-            <Line type="monotone" dataKey="d_t_bolus_carbs" stroke="#22c55e" strokeWidth={2} name="Meal + Insulin" />
-            <Line type="monotone" dataKey="d_t_bolus_carbs_sleep_exercise" stroke="#8B5CF6" strokeWidth={2} name="Sleep/Exercise" />
-          </>
+        lines.push(
+          <Line 
+            key="csv_no_future"
+            type="monotone" 
+            dataKey="csv_no_future" 
+            stroke="#EF4444" 
+            strokeWidth={2} 
+            strokeDasharray="5 5" 
+            name="Baseline" 
+            connectNulls={true}
+          />,
+          <Line 
+            key="csv_with_future"
+            type="monotone" 
+            dataKey="csv_with_future" 
+            stroke="#3B82F6" 
+            strokeWidth={2} 
+            strokeDasharray="3 3" 
+            name="With Future" 
+            connectNulls={true}
+          />,
+          <Line 
+            key="d_t_bolus_carbs"
+            type="monotone" 
+            dataKey="d_t_bolus_carbs" 
+            stroke="#22c55e" 
+            strokeWidth={2} 
+            name="Meal + Insulin" 
+            connectNulls={true}
+          />,
+          <Line 
+            key="d_t_bolus_carbs_sleep_exercise"
+            type="monotone" 
+            dataKey="d_t_bolus_carbs_sleep_exercise" 
+            stroke="#8B5CF6" 
+            strokeWidth={2} 
+            name="Sleep/Exercise" 
+            connectNulls={true}
+          />
         );
     }
+
+    return lines;
   };
+
+    // Get all plotted glucose values
+  const yValues: number[] = [];
+
+  forecast.chartData.forEach((d) => {
+    ["history", "csv_no_future", "csv_with_future", "d_t_bolus_carbs", "d_t_bolus_carbs_sleep_exercise"]
+    .forEach((key) => {
+      const v = (d as any)[key];
+      if (typeof v === "number" && v > 0) {
+        const rounded = Math.round(v * 10) / 10; 
+        yValues.push(rounded);
+      }
+    });
+  });
+
+  // Get dynamic min/max with padding
+  const yMin = yValues.length ? Math.min(...yValues) - 10 : 40;
+  const yMax = yValues.length ? Math.max(...yValues) + 10 : 400;
+
+  // Generate ticks every 2nd step
+  const xTicks = forecast.chartData
+    .map(d => d.time)
+    .filter((_, index) => index % 2 === 0);
 
 
   return (
@@ -142,17 +258,49 @@ const Dashboard = () => {
 
         {/* Chart */}
         <div className="chart-container">
-          <ResponsiveContainer width="100%" height={350}>
-            <LineChart data={forecast.chartData.filter(d => d.time >= 1)}>
+          <ResponsiveContainer width="100%" height={400}>
+            <LineChart data={forecast.chartData}>
               <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="time" type="number" domain={[1, 12]} ticks={[1,2,3,4,5,6,7,8,9,10,11,12]} label={{ value: "Time (min)", position: "insideBottom", offset: -5 }} />
-              <YAxis label={{ value: "Glucose (mg/dL)", angle: -90, position: "insideLeft" }} />
-              <Tooltip />
-              <Legend />
+              <XAxis 
+                dataKey="time" 
+                type="number" 
+                domain={['dataMin', 'dataMax']} 
+                ticks={xTicks}
+                tickFormatter={(tick, index) => `${tick * 5}`}
+                label={{ value: 'Time (minutes)', position: 'insideBottom', offset: -10 }}
+              />
+              <YAxis
+                domain={[yMin, yMax]}
+                tick={{ dx: 0 }}   // negative moves numbers left, increasing spacing
+                label={{ value: "Glucose (mg/dL)", angle: -90, position: "insideLeft" , offset: 1}}
+              />
+
+
+              <Tooltip 
+                labelFormatter={(value) => `Step: ${value}`}
+                formatter={(value: any) => [value?.toFixed(1) || 'N/A', '']}
+              />
+              <Legend wrapperStyle={{position: "relative"}}/>
               {renderLines()}
             </LineChart>
           </ResponsiveContainer>
         </div>
+
+        {/* Debug Info - Remove in production 
+        {forecast.chartData.length > 0 && (
+          <div style={{ 
+            fontSize: '12px', 
+            color: '#666', 
+            marginTop: '8px',
+            padding: '8px',
+            backgroundColor: '#f5f5f5',
+            borderRadius: '4px'
+          }}>
+            Data points: {forecast.chartData.length} | 
+            History points: {forecast.chartData.filter(d => d.history !== undefined).length} | 
+            Prediction points: {forecast.chartData.filter(d => d.csv_no_future !== undefined).length}
+          </div>
+        )}*/}
 
         {/* Graph Buttons */}
         <div className="graph-buttons">
@@ -180,9 +328,8 @@ const Dashboard = () => {
         {/* Input Form */}
         {viewMode === "input" ? (
           <div className="input-form">
-            <Input label="Current Glucose" type="number" value={currentGlucose} onChange={(e) => setCurrentGlucose(e.target.value)} />
-            <Input label="Insulin (Units)" type="number" step="0.5" value={insulin} onChange={(e) => setInsulin(e.target.value)} />
-            <Input label="Food (Carbs in grams)" type="number" step="5" value={food} onChange={(e) => setFood(e.target.value)} />
+            <Input label="Food (Carbs in grams)" type="number" step="5" min="0" value={food} onChange={(e) => setFood(e.target.value)} />
+            <Input label="Insulin (Units)" type="number" step="0.5" min="0" value={insulin} onChange={(e) => setInsulin(e.target.value)} />
 
             <div className="toggle-group">
               <span>Exercise:</span>
@@ -215,7 +362,12 @@ const Dashboard = () => {
           <div className="results-form">
             <Input label="Short Term Prediction" value={forecast.shortTermPrediction} readOnly />
             <Input label="Long Term Prediction" value={forecast.longTermPrediction} readOnly />
-            <Textarea label="Intervention" value={forecast.interventions.map(i => `${i.scenario}: ${i.message}`).join("\n")} readOnly />
+            <Textarea 
+              label="Interventions" 
+              value={forecast.interventions.map(i => `${i.icon} ${i.scenario}: ${i.message}`).join("\n\n")} 
+              readOnly 
+              rows={8}
+            />
           </div>
         )}
       </main>

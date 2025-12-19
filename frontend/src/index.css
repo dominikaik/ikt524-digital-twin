@@ -57,7 +57,7 @@ body {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 0;
-  margin-bottom: 2rem;
+  margin-bottom: 5px;
   border: 1px solid #d1d5db;
   border-radius: 0;
   overflow: hidden;
